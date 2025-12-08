@@ -1,7 +1,7 @@
 #include "FilterVertices.h"
 #include "GenerateFilteringPlan.h"
 #include <memory.h>
-#include <utility/graphoperations.h>
+#include <utils/graphoperations.h>
 #include <vector>
 #include <algorithm>
 

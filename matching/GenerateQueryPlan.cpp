@@ -3,7 +3,7 @@
 #include <limits>
 #include <cassert>
 #include <algorithm>
-#include <utility/graphoperations.h>
+#include <utils/graphoperations.h>
 #include <memory.h>
 
 void GenerateQueryPlan::generateGQLQueryPlan(const Graph *data_graph, const Graph *query_graph, ui *candidates_count,

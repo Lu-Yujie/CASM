@@ -1,7 +1,7 @@
 #include "EvaluateQuery.h"
-#include "utility/bsx/IndepSet.h"
-#include "utility/bsx/nodeSim.h"
-#include "utility/bsx/SetOp.h"
+#include "utils/bsx/IndepSet.h"
+#include "utils/bsx/nodeSim.h"
+#include "utils/bsx/SetOp.h"
 #include <stack>
 #include <vector>
 #include <cstring>

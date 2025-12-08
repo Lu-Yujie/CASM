@@ -1,7 +1,7 @@
 #ifndef SUBGRAPHMATCHING_EVALUATEQUERY_H
 #define SUBGRAPHMATCHING_EVALUATEQUERY_H
 
-#include "utility/bsx/bsx.h"
+#include "utils/bsx/bsx.h"
 #include <vector>
 #include <queue>
 #include <unordered_set>

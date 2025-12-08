@@ -3,7 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
-#include <utility/graphoperations.h>
+#include <utils/graphoperations.h>
 
 void Graph::BuildReverseIndex() {
     reverse_index_ = new ui[vertices_count_];

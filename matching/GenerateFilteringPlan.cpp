@@ -1,7 +1,7 @@
 #include "GenerateFilteringPlan.h"
 #include "FilterVertices.h"
 #include <queue>
-#include <utility/graphoperations.h>
+#include <utils/graphoperations.h>
 
 void GenerateFilteringPlan::generateTSOFilterPlan(const Graph *data_graph, const Graph *query_graph, TreeNode *&tree,
                                                    VertexID *&order) {

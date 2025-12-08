@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <vector>
-#include "utility/sparsepp/spp.h"
+#include "utils/sparsepp/spp.h"
 #include "configuration/types.h"
 #include "configuration/config.h"
 

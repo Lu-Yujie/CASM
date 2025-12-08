@@ -1,7 +1,6 @@
 #include <chrono>
 #include <fstream>
 
-#include "matchingcommand.h"
 #include "graph/graph.h"
 #include "GenerateFilteringPlan.h"
 #include "FilterVertices.h"
@@ -9,32 +8,39 @@
 #include "GenerateQueryPlan.h"
 #include "EvaluateQuery.h"
 #include "timeOp.h"
+#include "utils/CLI11.hpp"
 
 #define NANOSECTOSEC(elapsed_time) ((elapsed_time)/(double)1000000000)
 #define BYTESTOMB(memory_cost) ((memory_cost)/(double)(1024 * 1024))
 #define KBTOMB(memory_cost) ((memory_cost)/(double)(1024))
 
 int main(int argc, char** argv) {
-    MatchingCommand command(argc, argv);
-    std::string input_query_graph_file = command.getQueryGraphFilePath();
-    std::string input_data_graph_file = command.getDataGraphFilePath();
-    std::string input_filter_type = command.getFilterType();
-    std::string input_order_type = command.getOrderType();
-    std::string input_engine_type = command.getEngineType();
-    std::string input_max_embedding_num = command.getMaximumEmbeddingNum();
-    std::string input_time_limit = command.getTimeLimit();
+    CLI::App app{"App description"};
+    std::string query_file, data_file, stream_file, filter_type, order_type,
+                engine_type, max_embedding_num, time_limit_str;
+
+    app.add_option("-q,--query", query_file, "query graph file")->required();
+    app.add_option("-d,--data", data_file, "initial data graph file")->required();
+    app.add_option("-u,--update", stream_file, "data graph update stream file")->required();
+    app.add_option("-filter", filter_type, "filter type");
+    app.add_option("-order", order_type, "order type");
+    app.add_option("-engine", engine_type, "engine type");
+    app.add_option("-time_limit", time_limit_str, "time limit");
+    app.add_option("-num", max_embedding_num, "max embedding number");
+
+    CLI11_PARSE(app, argc, argv);
 
     /**
      * Output the command line information.
      */
     std::cout << "Command Line:" << std::endl;
-    std::cout << "\tData Graph: " << input_data_graph_file << std::endl;
-    std::cout << "\tQuery Graph: " << input_query_graph_file << std::endl;
-    std::cout << "\tFilter Type: " << input_filter_type << std::endl;
-    std::cout << "\tOrder Type: " << input_order_type << std::endl;
-    std::cout << "\tEngine Type: " << input_engine_type << std::endl;
-    std::cout << "\tOutput Limit: " << input_max_embedding_num << std::endl;
-    std::cout << "\tTime Limit (seconds): " << input_time_limit << std::endl;
+    std::cout << "\tData Graph: " << data_file << std::endl;
+    std::cout << "\tQuery Graph: " << query_file << std::endl;
+    std::cout << "\tFilter Type: " << filter_type << std::endl;
+    std::cout << "\tOrder Type: " << order_type << std::endl;
+    std::cout << "\tEngine Type: " << engine_type << std::endl;
+    std::cout << "\tOutput Limit: " << max_embedding_num << std::endl;
+    std::cout << "\tTime Limit (seconds): " << time_limit_str << std::endl;
     std::cout << "--------------------------------------------------------------------" << std::endl;
 
     /**
@@ -45,12 +51,12 @@ int main(int argc, char** argv) {
     auto start = std::chrono::high_resolution_clock::now();
 
     Graph* query_graph = new Graph(true);
-    query_graph->loadGraphFromFile(input_query_graph_file);
-    query_graph->g_name = input_query_graph_file;
+    query_graph->loadGraphFromFile(query_file);
+    query_graph->g_name = query_file;
     query_graph->buildCoreTable();
 
     Graph* data_graph = new Graph(true);
-    data_graph->loadGraphFromFile(input_data_graph_file);
+    data_graph->loadGraphFromFile(data_file);
 
     auto end = std::chrono::high_resolution_clock::now();
 
@@ -77,14 +83,14 @@ int main(int argc, char** argv) {
     mpz_t embedding_cnt;
     size_t call_count = 0;
     int64_t time_limit; // 300s by default
-    sscanf(input_time_limit.c_str(), "%ld", &time_limit); // millisecond
+    sscanf(time_limit_str.c_str(), "%ld", &time_limit); // millisecond
     auto end_time = TimeOp::getClockNan();
     end_time += time_limit * 1000 * 1000;
-    if (input_max_embedding_num == "MAX") {
+    if (max_embedding_num == "MAX") {
         output_limit = numeric_limits<uint64_t>::max();
     }
     else {
-        sscanf(input_max_embedding_num.c_str(), "%zu", &output_limit);
+        sscanf(max_embedding_num.c_str(), "%zu", &output_limit);
     }
 
     start = std::chrono::high_resolution_clock::now();
@@ -97,16 +103,16 @@ int main(int argc, char** argv) {
     TreeNode* dpiso_tree = nullptr;
     std::vector<std::unordered_map<VertexID, std::vector<VertexID >>> TE_Candidates;
     std::vector<std::vector<std::unordered_map<VertexID, std::vector<VertexID>>>> NTE_Candidates;
-    if (input_filter_type == "LDF") {
+    if (filter_type == "LDF") {
         FilterVertices::LDFFilter(data_graph, query_graph, candidates, candidates_count);
-    } else if (input_filter_type == "NLF") {
+    } else if (filter_type == "NLF") {
         FilterVertices::NLFFilter(data_graph, query_graph, candidates, candidates_count);
-    } else if (input_filter_type == "CFL") {
+    } else if (filter_type == "CFL") {
         FilterVertices::CFLFilter(data_graph, query_graph, candidates, candidates_count, cfl_order, cfl_tree);
-    } else if (input_filter_type == "DPiso") {
+    } else if (filter_type == "DPiso") {
         FilterVertices::DPisoFilter(data_graph, query_graph, candidates, candidates_count, dpiso_order, dpiso_tree);
     } else {
-        std::cout << "The specified filter type '" << input_filter_type << "' is not supported." << std::endl;
+        std::cout << "The specified filter type '" << filter_type << "' is not supported." << std::endl;
         exit(-1);
     }
 
@@ -127,7 +133,7 @@ int main(int argc, char** argv) {
         edge_matrix[i] = new Edges *[query_graph->getVerticesCount()];
     }
 
-    if (input_engine_type != "BSX") {
+    if (engine_type != "BSX") {
         BuildEdgeIndex::buildCansIdxIndex(data_graph, query_graph, candidates, candidates_count, edge_matrix);
     } else {
         BuildEdgeIndex::buildCansIndex(data_graph, query_graph, candidates, candidates_count, edge_matrix);
@@ -144,10 +150,10 @@ int main(int argc, char** argv) {
     ui* matching_order = nullptr;
     ui* pivots = nullptr;
 
-    if (input_order_type == "GQL") {
+    if (order_type == "GQL") {
         GenerateQueryPlan::generateGQLQueryPlan(data_graph, query_graph, candidates_count, matching_order, pivots);
     } else {
-        std::cout << "The specified order type '" << input_order_type << "' is not supported." << std::endl;
+        std::cout << "The specified order type '" << order_type << "' is not supported." << std::endl;
     }
 
     end = std::chrono::high_resolution_clock::now();
@@ -160,14 +166,14 @@ int main(int argc, char** argv) {
     std::cout << "Enumerate..." << std::endl;
     start = std::chrono::high_resolution_clock::now();
 
-    if (input_engine_type == "BS1") {
+    if (engine_type == "BS1") {
         EvaluateQuery::BS1Engine(data_graph, query_graph, edge_matrix, candidates, candidates_count,
                                  matching_order, pivots, output_limit, call_count, embedding_cnt, end_time);
-    } else if (input_engine_type == "BSX") {
+    } else if (engine_type == "BSX") {
         EvaluateQuery::BSXEngine(data_graph, query_graph, edge_matrix, candidates, candidates_count,
                                  matching_order, output_limit, call_count, embedding_cnt, end_time);
     } else {
-        std::cout << "The specified engine type '" << input_engine_type << "' is not supported." << std::endl;
+        std::cout << "The specified engine type '" << engine_type << "' is not supported." << std::endl;
         exit(-1);
     }
 
@@ -232,11 +238,11 @@ int main(int argc, char** argv) {
     std::fstream output;
     output.open("./bsx_output.csv", std::ios::out | std::ios::app);
 
-    output << input_query_graph_file;
-    output << "," << input_data_graph_file;
-    output << "," << input_filter_type;
-    output << "," << input_order_type;
-    output << "," << input_engine_type;
+    output << query_file;
+    output << "," << data_file;
+    output << "," << filter_type;
+    output << "," << order_type;
+    output << "," << engine_type;
     output << "," << NANOSECTOSEC(load_graphs_time_in_ns);
     output << "," << NANOSECTOSEC(filter_vertices_time_in_ns);
     output << "," << NANOSECTOSEC(build_table_time_in_ns);
