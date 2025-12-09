@@ -233,9 +233,9 @@ void EvaluateQuery::generateValidCandidateIndex(const Graph *data_graph, ui dept
     VertexID u = order[depth];
     VertexID pivot_vertex = pivot[depth];
     ui idx_id = idx_embedding[pivot_vertex];
-    Edges &edge = *edge_matrix[pivot_vertex][u];
-    ui count = edge.offset_[idx_id + 1] - edge.offset_[idx_id];
-    ui *candidate_idx = edge.edge_ + edge.offset_[idx_id];
+    Edges &edges = *edge_matrix[pivot_vertex][u];
+    ui count = edges.offset_[idx_id + 1] - edges.offset_[idx_id];
+    ui *candidate_idx = edges.edge_ + edges.offset_[idx_id];
 
     ui valid_candidate_index_count = 0;
 

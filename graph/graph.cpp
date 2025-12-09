@@ -1,5 +1,6 @@
 #include "graph.h"
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <algorithm>
 #include <chrono>
@@ -22,7 +23,6 @@ void Graph::BuildReverseIndex() {
     }
 }
 
-#if OPTIMIZED_VLABELED_GRAPH == 1
 void Graph::BuildNLF() {
     nlf_ = new std::unordered_map<LabelID, ui>[vertices_count_];
     for (ui i = 0; i < vertices_count_; ++i) {
@@ -72,8 +72,6 @@ void Graph::BuildVLabelOffset() {
         }
     }
 }
-
-#endif
 
 void Graph::loadGraphFromFile(const std::string &file_path) {
     std::ifstream infile(file_path);
@@ -149,12 +147,69 @@ void Graph::loadGraphFromFile(const std::string &file_path) {
     BuildReverseIndex();
     buildEdgeIndex();
 
-#if OPTIMIZED_VLABELED_GRAPH == 1
     if (enable_vlabel_offset_) {
         BuildNLF();
-        // BuildLabelOffset();
     }
-#endif
+}
+
+void Graph::load_stream(const std::string& file_path, std::vector<Update>& stream) {
+    uint32_t vertex_num = this->getVerticesCount();
+    spp::sparse_hash_map<uint32_t, uint32_t> new_vertex_label;
+    Update update;
+
+    std::ifstream ifs(file_path);
+    if (!ifs.is_open()) {
+        std::cout << "Can not open the stream file " << file_path << " ." << std::endl;
+        exit(-1);
+    }
+
+    while (ifs.good()) {
+        std::string tmp_str;
+        std::stringstream ss;
+        std::string op_str;
+        std::getline(ifs, tmp_str);
+
+        if (tmp_str[0] != '#') {
+            ss.clear();
+            ss << tmp_str;
+            ss >> op_str;
+
+            if (op_str == "v") {
+                uint32_t id;
+                uint32_t label;
+                ss >> id >> label;
+                if (id < vertex_num) {
+                    if (label != this->getVertexLabel(id)) {
+                        std::cout << "update label(" << label << ") of " << id <<" is not aligned"
+                                  << " with label(" << this->getVertexLabel(id) << ") in data graph" << std::endl;
+                        exit(-1);
+                    }
+                }
+                else {
+                    new_vertex_label[id] = label;
+                }
+            } else if (op_str == "e" || op_str == "-e") {
+                update.op_ = op_str == "e" ? '+' : '-';
+                uint32_t first, second;
+                ss >> first >> second;
+                update.edge_.vertices_[0] = first;
+                update.edge_.vertices_[1] = second;
+                update.labels_.src_label_ = first < vertex_num
+                                            ? this->getVertexLabel(first)
+                                            : new_vertex_label[first];
+                update.labels_.dst_label_ = second < vertex_num
+                                            ? this->getVertexLabel(second)
+                                            : new_vertex_label[second];
+
+                stream.emplace_back(update);
+            } else {
+                std::cout << "unsupported op: " << op_str << ", expected #, e, -e" << std::endl;
+                exit(-1);
+            }
+        }
+    }
+
+    ifs.close();
 }
 
 void Graph::printGraphMetaData() {
@@ -173,200 +228,10 @@ void Graph::buildCoreTable() {
     }
 }
 
-void Graph::loadGraphFromFileCompressed(const std::string &degree_path, const std::string &edge_path,
-                                        const std::string &vlabel_path) {
-    std::ifstream deg_file(degree_path, std::ios::binary);
-
-    if (deg_file.is_open()) {
-        std::cout << "Open degree file " << degree_path << " successfully." << std::endl;
-    }
-    else {
-        std::cerr << "Cannot open degree file " << degree_path << " ." << std::endl;
-        exit(-1);
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
-    int int_size;
-    deg_file.read(reinterpret_cast<char *>(&int_size), 4);
-    deg_file.read(reinterpret_cast<char *>(&vertices_count_), 4);
-    deg_file.read(reinterpret_cast<char *>(&edges_count_), 4);
-
-    offsets_ = new ui[vertices_count_ + 1];
-    ui* degrees = new unsigned int[vertices_count_];
-
-    deg_file.read(reinterpret_cast<char *>(degrees), sizeof(int) * vertices_count_);
-
-
-    deg_file.close();
-    deg_file.clear();
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::cout << "Load degree file time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " seconds" << std::endl;
-
-    std::ifstream adj_file(edge_path, std::ios::binary);
-
-    if (adj_file.is_open()) {
-        std::cout << "Open edge file " << edge_path << " successfully." << std::endl;
-    }
-    else {
-        std::cerr << "Cannot open edge file " << edge_path << " ." << std::endl;
-        exit(-1);
-    }
-
-    start = std::chrono::high_resolution_clock::now();
-    size_t neighbors_count = (size_t)edges_count_ * 2;
-    neighbors_ = new ui[neighbors_count];
-
-    offsets_[0] = 0;
-    for (ui i = 1; i <= vertices_count_; ++i) {
-        offsets_[i] = offsets_[i - 1] + degrees[i - 1];
-    }
-
-    max_degree_ = 0;
-
-    for (ui i = 0; i < vertices_count_; ++i) {
-        if (degrees[i] > 0) {
-            if (degrees[i] > max_degree_)
-                max_degree_ = degrees[i];
-            adj_file.read(reinterpret_cast<char *>(neighbors_ + offsets_[i]), degrees[i] * sizeof(int));
-            std::sort(neighbors_ + offsets_[i], neighbors_ + offsets_[i + 1]);
-        }
-    }
-
-    adj_file.close();
-    adj_file.clear();
-
-    delete[] degrees;
-
-    end = std::chrono::high_resolution_clock::now();
-    std::cout << "Load adj file time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " seconds" << std::endl;
-
-
-    std::ifstream vlabel_file(vlabel_path, std::ios::binary);
-    if (vlabel_file.is_open())  {
-        std::cout << "Open vlabel file " << vlabel_path << " successfully." << std::endl;
-    }
-    else {
-        std::cerr << "Cannot open vlabel file " << vlabel_path << " ." << std::endl;
-        exit(-1);
-    }
-
-    start = std::chrono::high_resolution_clock::now();
-
-    vlabels_ = new ui[vertices_count_];
-    vlabel_file.read(reinterpret_cast<char *>(vlabels_), sizeof(int) * vertices_count_);
-
-    vlabel_file.close();
-    vlabel_file.clear();
-
-    ui max_vlabel_id = 0;
-    for (ui i = 0; i < vertices_count_; ++i) {
-        ui vlabel = vlabels_[i];
-
-        if (vlabels_frequency_.find(vlabel) == vlabels_frequency_.end()) {
-            vlabels_frequency_[vlabel] = 0;
-            if (vlabel > max_vlabel_id)
-                max_vlabel_id = vlabel;
-        }
-
-        vlabels_frequency_[vlabel] += 1;
-    }
-
-    vlabels_count_ = (ui)vlabels_frequency_.size() > (max_vlabel_id + 1) ? (ui)vlabels_frequency_.size() : max_vlabel_id + 1;
-
-    for (auto element : vlabels_frequency_) {
-        if (element.second > max_vlabel_frequency_) {
-            max_vlabel_frequency_ = element.second;
-        }
-    }
-
-    end = std::chrono::high_resolution_clock::now();
-    std::cout << "Load vlabel file time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " seconds" << std::endl;
-
-    start = std::chrono::high_resolution_clock::now();
-    BuildReverseIndex();
-    end = std::chrono::high_resolution_clock::now();
-    std::cout << "Build reverse index file time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " seconds" << std::endl;
-
-    start = std::chrono::high_resolution_clock::now();
-    buildEdgeIndex();
-    end = std::chrono::high_resolution_clock::now();
-    std::cout << "Build edge index time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " seconds" << std::endl;
-
-#if OPTIMIZED_VLABELED_GRAPH == 1
-    if (enable_vlabel_offset_) {
-        BuildNLF();
-        // BuildLabelOffset();
-    }
-#endif
-}
-
-void Graph::storeComparessedGraph(const std::string& degree_path, const std::string& edge_path,
-                                  const std::string& vlabel_path) {
-    ui* degrees = new ui[vertices_count_];
-    for (ui i = 0; i < vertices_count_; ++i) {
-        degrees[i] = offsets_[i + 1] - offsets_[i];
-    }
-
-    std::ofstream deg_outputfile(degree_path, std::ios::binary);
-
-    if (deg_outputfile.is_open()) {
-        std::cout << "Open degree file " << degree_path << " successfully." << std::endl;
-    }
-    else {
-        std::cerr << "Cannot degree edge file " << degree_path << " ." << std::endl;
-        exit(-1);
-    }
-
-    int int_size = sizeof(int);
-    size_t vertex_array_bytes = ((size_t)vertices_count_) * 4;
-    deg_outputfile.write(reinterpret_cast<const char *>(&int_size), 4);
-    deg_outputfile.write(reinterpret_cast<const char *>(&vertices_count_), 4);
-    deg_outputfile.write(reinterpret_cast<const char *>(&edges_count_), 4);
-    deg_outputfile.write(reinterpret_cast<const char *>(degrees), vertex_array_bytes);
-
-    deg_outputfile.close();
-    deg_outputfile.clear();
-
-    delete[] degrees;
-
-    std::ofstream edge_outputfile(edge_path, std::ios::binary);
-
-    if (edge_outputfile.is_open()) {
-        std::cout << "Open edge file " << edge_path << " successfully." << std::endl;
-    }
-    else {
-        std::cerr << "Cannot edge file " << edge_path << " ." << std::endl;
-        exit(-1);
-    }
-
-    size_t edge_array_bytes = ((size_t)edges_count_ * 2) * 4;
-    edge_outputfile.write(reinterpret_cast<const char *>(neighbors_), edge_array_bytes);
-
-    edge_outputfile.close();
-    edge_outputfile.clear();
-
-    std::ofstream vlabel_outputfile(vlabel_path, std::ios::binary);
-
-    if (vlabel_outputfile.is_open()) {
-        std::cout << "Open vlabel file " << vlabel_path << " successfully." << std::endl;
-    }
-    else {
-        std::cerr << "Cannot vlabel file " << vlabel_path << " ." << std::endl;
-        exit(-1);
-    }
-
-    size_t vlabel_array_bytes = ((size_t)vertices_count_) * 4;
-    vlabel_outputfile.write(reinterpret_cast<const char *>(vlabels_), vlabel_array_bytes);
-
-    vlabel_outputfile.close();
-    vlabel_outputfile.clear();
-}
-
 void Graph::buildEdgeIndex() {
-    edge_index_ = new sparse_hash_map<uint64_t, std::vector<edge>*>();
+    edge_index_ = new sparse_hash_map<uint64_t, std::vector<Edge>*>();
 
-    edge cur_edge;
+    Edge cur_edge;
     for (uint32_t u = 0; u < vertices_count_; ++u) {
         uint32_t u_l = getVertexLabel(u);
 
@@ -383,7 +248,7 @@ void Graph::buildEdgeIndex() {
             cur_edge.vertices_[1] = v;
 
             if (!edge_index_->contains(key)) {
-                (*edge_index_)[key] = new std::vector<edge>();
+                (*edge_index_)[key] = new std::vector<Edge>();
             }
             (*edge_index_)[key]->emplace_back(cur_edge);
         }

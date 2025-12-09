@@ -12,20 +12,20 @@
 
 #define NANOSECTOSEC(elapsed_time) ((elapsed_time)/(double)1000000000)
 #define BYTESTOMB(memory_cost) ((memory_cost)/(double)(1024 * 1024))
-#define KBTOMB(memory_cost) ((memory_cost)/(double)(1024))
 
 int main(int argc, char** argv) {
     CLI::App app{"App description"};
     std::string query_file, data_file, stream_file, filter_type, order_type,
-                engine_type, max_embedding_num, time_limit_str;
+                engine_type, max_embedding_num;
+    int64_t time_limit; // 1000ms by default
 
     app.add_option("-q,--query", query_file, "query graph file")->required();
     app.add_option("-d,--data", data_file, "initial data graph file")->required();
     app.add_option("-u,--update", stream_file, "data graph update stream file")->required();
-    app.add_option("-filter", filter_type, "filter type");
-    app.add_option("-order", order_type, "order type");
-    app.add_option("-engine", engine_type, "engine type");
-    app.add_option("-time_limit", time_limit_str, "time limit");
+    app.add_option("-filter", filter_type, "filter type")->default_val("CFL");
+    app.add_option("-order", order_type, "order type")->default_val("GQL");
+    app.add_option("-engine", engine_type, "engine type")->default_val("BSX");
+    app.add_option("-time_limit", time_limit, "time limit(millisecond)")->default_val(1000);
     app.add_option("-num", max_embedding_num, "max embedding number");
 
     CLI11_PARSE(app, argc, argv);
@@ -36,11 +36,12 @@ int main(int argc, char** argv) {
     std::cout << "Command Line:" << std::endl;
     std::cout << "\tData Graph: " << data_file << std::endl;
     std::cout << "\tQuery Graph: " << query_file << std::endl;
+    std::cout << "\tUpdate File: " << stream_file << std::endl;
     std::cout << "\tFilter Type: " << filter_type << std::endl;
     std::cout << "\tOrder Type: " << order_type << std::endl;
     std::cout << "\tEngine Type: " << engine_type << std::endl;
     std::cout << "\tOutput Limit: " << max_embedding_num << std::endl;
-    std::cout << "\tTime Limit (seconds): " << time_limit_str << std::endl;
+    std::cout << "\tTime Limit (millisecond): " << time_limit << std::endl;
     std::cout << "--------------------------------------------------------------------" << std::endl;
 
     /**
@@ -57,6 +58,9 @@ int main(int argc, char** argv) {
 
     Graph* data_graph = new Graph(true);
     data_graph->loadGraphFromFile(data_file);
+
+    std::vector<Update> stream;
+    data_graph->load_stream(stream_file, stream);
 
     auto end = std::chrono::high_resolution_clock::now();
 
@@ -82,8 +86,6 @@ int main(int argc, char** argv) {
     size_t output_limit = 0;
     mpz_t embedding_cnt;
     size_t call_count = 0;
-    int64_t time_limit; // 300s by default
-    sscanf(time_limit_str.c_str(), "%ld", &time_limit); // millisecond
     auto end_time = TimeOp::getClockNan();
     end_time += time_limit * 1000 * 1000;
     if (max_embedding_num == "MAX") {
@@ -227,9 +229,6 @@ int main(int argc, char** argv) {
     gmp_printf("#Embeddings: %Zd\n", embedding_cnt);
     printf("Call Count: %zu\n", call_count);
     printf("Per Call Count Time (nanoseconds): %.4lf\n", enumeration_time_in_ns / (call_count == 0 ? 1 : call_count));
-#ifdef ANALYZE_MEMORY
-    printf("Memory cost (MB): %.4lf\n", KBTOMB(mem::getValue()));
-#endif
     std::cout << "End." << std::endl;
 
     /**
@@ -253,9 +252,6 @@ int main(int argc, char** argv) {
     char *cnt = mpz_get_str(NULL, 10, embedding_cnt);
     output << "," << cnt;
     output << "," << call_count;
-#ifdef ANALYZE_MEMORY
-    output << "," << mem::getValue();  // KB
-#endif
     output << std::endl;
     
     output.close();

@@ -11,21 +11,31 @@ typedef ui LabelID;
 
 #define UINT_MAX std::numeric_limits<ui>::max()
 
-enum MatchingIndexType {
-    VertexCentric = 0,
-    EdgeCentric = 1
-};
-
-struct edge {
+struct Edge {
     uint32_t vertices_[2];
-    edge(uint32_t src, uint32_t dst) {
+    Edge(uint32_t src, uint32_t dst) {
         vertices_[0] = src;
         vertices_[1] = dst;
     }
-    edge() {}
+    Edge() {}
     uint32_t operator[](ui index) {
         return vertices_[index];
     }
+};
+
+struct ULabel {
+    uint32_t src_label_;
+    uint32_t dst_label_;
+    bool operator==(const ULabel& l) const {
+        return l.src_label_ == src_label_ && l.dst_label_ == dst_label_;
+    }
+};
+
+struct Update {
+    uint64_t id_;
+    char op_;
+    Edge edge_;
+    ULabel labels_;
 };
 
 class TreeNode {

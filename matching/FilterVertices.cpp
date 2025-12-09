@@ -192,18 +192,14 @@ FilterVertices::computeCandidateWithNLF(const Graph *data_graph, const Graph *qu
                                                ui &count, ui *buffer) {
     LabelID label = query_graph->getVertexLabel(query_vertex);
     ui degree = query_graph->getVertexDegree(query_vertex);
-#if OPTIMIZED_VLABELED_GRAPH == 1
     auto u_nlf = query_graph->getVertexNLF(query_vertex);
-#endif
     ui data_vertex_num;
     const ui* data_vertices = data_graph->getVerticesByLabel(label, data_vertex_num);
     count = 0;
     for (ui j = 0; j < data_vertex_num; ++j) {
         ui data_vertex = data_vertices[j];
         if (data_graph->getVertexDegree(data_vertex) >= degree) {
-
             // NLF check
-#if OPTIMIZED_VLABELED_GRAPH == 1
             auto v_nlf = data_graph->getVertexNLF(data_vertex);
             if (v_nlf->size() >= u_nlf->size()) {
                 bool is_valid = true;
@@ -222,12 +218,6 @@ FilterVertices::computeCandidateWithNLF(const Graph *data_graph, const Graph *qu
                     count += 1;
                 }
             }
-#else
-            if (buffer != nullptr) {
-                buffer[count] = data_vertex;
-            }
-            count += 1;
-#endif
         }
     }
 
@@ -264,9 +254,7 @@ void FilterVertices::generateCandidates(const Graph *data_graph, const Graph *qu
                                        ui *candidates_count, ui *flag, ui *updated_flag) {
     LabelID query_vertex_label = query_graph->getVertexLabel(query_vertex);
     ui query_vertex_degree = query_graph->getVertexDegree(query_vertex);
-#if OPTIMIZED_VLABELED_GRAPH == 1
     auto u_nlf = query_graph->getVertexNLF(query_vertex);
-#endif
     ui count = 0;
     ui updated_flag_count = 0;
     for (ui i = 0; i < pivot_vertices_count; ++i) {
@@ -302,7 +290,6 @@ void FilterVertices::generateCandidates(const Graph *data_graph, const Graph *qu
         VertexID v = updated_flag[i];
         if (flag[v] == count) {
             // NLF filter.
-#if OPTIMIZED_VLABELED_GRAPH == 1
             auto v_nlf = data_graph->getVertexNLF(v);
             if (v_nlf->size() >= u_nlf->size()) {
                 bool is_valid = true;
@@ -317,9 +304,6 @@ void FilterVertices::generateCandidates(const Graph *data_graph, const Graph *qu
                     candidates[query_vertex][candidates_count[query_vertex]++] = v;
                 }
             }
-#else
-            candidates[query_vertex][candidates_count[query_vertex]++] = v;
-#endif
         }
     }
 

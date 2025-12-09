@@ -34,22 +34,17 @@ private:
     ui core_length_;
 
     std::unordered_map<LabelID, ui> vlabels_frequency_;
-    sparse_hash_map<uint64_t, std::vector<edge>* >* edge_index_;
+    sparse_hash_map<uint64_t, std::vector<Edge>* >* edge_index_;
 
-#if OPTIMIZED_VLABELED_GRAPH == 1
     ui* vlabels_offsets_;
 
-    // vid->neighbor_label
+    // vid->(neighbor_label, label_cnt)
     std::unordered_map<LabelID, ui>* nlf_;
-#endif
 
 private:
     void BuildReverseIndex();
-
-#if OPTIMIZED_VLABELED_GRAPH == 1
     void BuildNLF();
     void BuildVLabelOffset();
-#endif
 
 public:
     Graph(const bool enable_label_offset) {
@@ -70,10 +65,8 @@ public:
         core_table_ = nullptr;
         vlabels_frequency_.clear();
         edge_index_ = nullptr;
-#if OPTIMIZED_VLABELED_GRAPH == 1
         vlabels_offsets_ = nullptr;
         nlf_ = nullptr;
-#endif
     }
 
     ~Graph() {
@@ -84,21 +77,13 @@ public:
         delete[] reverse_index_;
         delete[] core_table_;
         delete edge_index_;
-#if OPTIMIZED_VLABELED_GRAPH == 1
         delete[] vlabels_offsets_;
         delete[] nlf_;
-#endif
     }
 
 public:
-    // support edge label graph read
     void loadGraphFromFile(const std::string& file_path);
-    // not support edge label graph read
-    void loadGraphFromFileCompressed(const std::string& degree_path, const std::string& edge_path,
-                                     const std::string& label_path);
-    // not support edge label graph read
-    void storeComparessedGraph(const std::string& degree_path, const std::string& edge_path,
-                               const std::string& label_path);
+    void load_stream(const std::string& file_path, std::vector<Update>& stream);
     void printGraphMetaData();
 public:
     const ui getLabelsCount() const {
@@ -145,7 +130,7 @@ public:
         return neighbors_ + offsets_[id];
     }
 
-    const sparse_hash_map<uint64_t, std::vector<edge>*>* getEdgeIndex() const {
+    const sparse_hash_map<uint64_t, std::vector<Edge>*>* getEdgeIndex() const {
         return edge_index_;
     }
 
@@ -162,7 +147,6 @@ public:
         return offsets_;
     }
 
-#if OPTIMIZED_VLABELED_GRAPH == 1
     const ui * getNeighborsByLabel(const VertexID id, const LabelID label, ui& count) const {
         ui offset = id * vlabels_count_ + label;
         count = vlabels_offsets_[offset + 1] - vlabels_offsets_[offset];
@@ -190,7 +174,6 @@ public:
 
         return false;
     }
-#endif
 
     bool checkEdgeExistence(VertexID u, VertexID v) const {
         if (getVertexDegree(u) < getVertexDegree(v)) {
