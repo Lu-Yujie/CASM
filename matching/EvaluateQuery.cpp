@@ -1,7 +1,7 @@
 #include "EvaluateQuery.h"
 #include "utils/bsx/IndepSet.h"
 #include "utils/bsx/nodeSim.h"
-#include "utils/bsx/SetOp.h"
+#include "utils/SetOp.h"
 #include <stack>
 #include <vector>
 #include <cstring>
@@ -39,7 +39,7 @@ void EvaluateQuery::generateBN(const Graph *query_graph, ui *order, ui *pivot, u
 void
 EvaluateQuery::BS1Engine(const Graph *data_graph, const Graph *query_graph, Edges ***edge_matrix,
                              ui **candidates, ui *candidates_count, ui *order, ui *pivot,
-                             size_t output_limit_num, size_t &call_count, mpz_t embedding_cnt, int64_t& time_limit) {
+                             size_t output_limit_num, mpz_t embedding_cnt, int64_t& time_limit) {
     // Generate the bn.
     ui **bn;
     ui *bn_count;
@@ -56,8 +56,8 @@ EvaluateQuery::BS1Engine(const Graph *data_graph, const Graph *query_graph, Edge
     allocateBuffer(data_graph, query_graph, candidates_count, idx, idx_count, embedding, idx_embedding,
                    temp_buffer, valid_candidate_idx, visited_vertices);
     // Evaluate the query.
-    mpz_init_set_ui(embedding_cnt, 0);
-    int cur_depth = 0;
+    mpz_set_ui(embedding_cnt, 0);
+    ui cur_depth = 0;
     ui max_depth = query_graph->getVerticesCount();
     VertexID start_vertex = order[0];
 
@@ -123,7 +123,6 @@ EvaluateQuery::BS1Engine(const Graph *data_graph, const Graph *query_graph, Edge
                     goto EXIT;
                 }
             } else {
-                call_count += 1;
                 cur_depth += 1;
                 idx[cur_depth] = 0;
                 generateValidCandidateIndex(data_graph, cur_depth, embedding, idx_embedding, idx_count,
@@ -158,7 +157,7 @@ EvaluateQuery::BS1Engine(const Graph *data_graph, const Graph *query_graph, Edge
 
         // backtrack
         cur_depth -= 1;
-        if (cur_depth < 0)
+        if (cur_depth == (ui)-1)
             break;
         else
             visited_vertices[embedding[order[cur_depth]]] = false;
@@ -296,9 +295,9 @@ void EvaluateQuery::releaseBuffer(ui q_num, ui *idx, ui *idx_count, ui *embeddin
  * use bsx method
 */
 void
-EvaluateQuery::BSXEngine(const Graph *data_graph, const Graph *query_graph, Edges ***edge_matrix,
+EvaluateQuery::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
                           ui **candidates, ui *candidates_count, ui *order,
-                          size_t output_limit_num, size_t &call_count, mpz_t embedding_cnt, int64_t& time_limit) {
+                          size_t output_limit_num, mpz_t embedding_cnt, int64_t& time_limit) {
     ui q_num = query_graph->getVerticesCount();
     // separate leaf and trunk vertices(min_vertex_cover)
     ui num_cover = 0;
@@ -310,14 +309,14 @@ EvaluateQuery::BSXEngine(const Graph *data_graph, const Graph *query_graph, Edge
     // std::deque<IntersectCache> cachedIntersect;   // max size is the height of the tree
     // construct index structure, contains the history info
     // new index structure, update in time, 24-3-7
-    BSXIndex index(query_graph, data_graph, edge_matrix, candidates, candidates_count, num_cover);
+    BSXIndex index(query_graph, d_num, edge_matrix, candidates, candidates_count, num_cover);
     auto& batch_info = index.batch_info;
 
     // auxiliary data structure
     auto& visited_u = index.visited_u;
     auto& u2v = index.embedding->u2v;
     auto& depth2u = index.embedding->depth2u;
-    mpz_init_set_ui(embedding_cnt, 0);
+    mpz_set_ui(embedding_cnt, 0);
     ui cur_depth = 0;
     VertexID start_vertex = order[cur_depth];
     depth2u.emplace_back(start_vertex);
@@ -327,7 +326,7 @@ EvaluateQuery::BSXEngine(const Graph *data_graph, const Graph *query_graph, Edge
     // init info of start vertex
     batch_info[start_vertex].add();
     bsxComEqBatch(index, start_vertex);
-    batch_info[start_vertex].print();
+    // batch_info[start_vertex].print();
     index.valid_cans_[start_vertex].push(new VertexID[batch_info[start_vertex].maxCnt_.top()]);
     index.valid_cnt_[start_vertex].push(0);
 
@@ -417,11 +416,10 @@ EvaluateQuery::BSXEngine(const Graph *data_graph, const Graph *query_graph, Edge
                 VertexID cur_u = bsxGenNxtU(index, order, cur_depth, num_cover);
                 if (cur_u == (VertexID)-1) cur_u = order[cur_depth];
                 depth2u.emplace_back(cur_u);
-                call_count++;
                 // construct nbrs&seperate batches, and then refinement
                 batch_info[cur_u].add();
                 bsxComEqBatch(index, cur_u);
-                batch_info[cur_u].print();
+                // batch_info[cur_u].print();
                 index.valid_cans_[cur_u].push(new VertexID[batch_info[cur_u].maxCnt_.top()]);
                 index.valid_cnt_[cur_u].push(0);
                 visited_u[cur_u] = true;
@@ -433,7 +431,6 @@ EvaluateQuery::BSXEngine(const Graph *data_graph, const Graph *query_graph, Edge
         if (cur_depth == ui(-1))
             break;
         VertexID last_u = depth2u[cur_depth+1];
-        VertexID cur_u = depth2u[cur_depth];
         depth2u.resize(cur_depth+1);
         visited_u[last_u] = false;
 
@@ -769,7 +766,6 @@ EvaluateQuery::bsxRefine(BSXIndex& index, VertexID u) {
         auto& unbr = unbrs[i];
         if (index.visited_u[unbr]) continue;
         // old valid_cans of unbr
-        auto& unbr_valid_cans = index.valid_cans_[unbr].top();
         auto& unbr_valid_cnt = index.valid_cnt_[unbr].top();
         ui vnbr_cnt;
         auto vnbrs = index.getNeighbors(u, unbr, v, vnbr_cnt);

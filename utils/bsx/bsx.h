@@ -11,39 +11,8 @@
 #include <gmp.h>
 #include "graph/graph.h"
 #include "pretty_print.h"
+#include "utils/bSearch.h"
 using namespace std;
-typedef unsigned int ui;
-
-class b_search{
-public:
-/**
- * universal binary search for ui*
-*/
-// small array: linear seach
-static ui smallArraySearch(const ui* arr, ui size, ui target) {
-    for (ui i = 0; i < size; ++i) {
-        if (arr[i] == target)
-            return i;
-    }
-    return (ui)-1;
-}
-
-// large array, use lower bound func
-static ui largeArraySearch(const ui* arr, ui size, ui target) {
-    auto ptr = lower_bound(arr, arr + size, target);
-    if (ptr != arr + size && *ptr == target)
-        return ptr - arr;
-    else
-        return (ui)-1;
-}
-
-static ui search(const ui* arr, ui size, ui target) {
-    if (size <= 4) {
-        return smallArraySearch(arr, size, target);
-    }
-    return largeArraySearch(arr, size, target);
-}
-};  // class b_search
 
 /**structures used to store batch info
  * nodes: store batches which are seperated by offset
@@ -161,7 +130,7 @@ public:
     VertexID** index_cans_;  // used for index_, indicate valid_cans of index.top
     ui* index_cnt_;         //            ''             valid_cnt      ''
     const Graph* q_graph_;
-    const Graph* d_graph_;
+    ui dnum;
     ui max_can_num_;
     stack<vector<VertexID>> influenced_u_;  // influenced nodes in each layer, src_u is 1'th
     BatchInfo* batch_info;  // array[q_num], use uid as idx, because u may be grouped multi-times
@@ -175,13 +144,11 @@ public:
     // temporary embeddings
     mpz_t level_embeddings_;  // #embeddings of one depth
     mpz_t label_embeddings_;  // #embeddings of one kind of label, for enumeration
-    BSXIndex(const Graph*q_graph, const Graph*d_graph, Edges ***index, ui **cans, ui *cans_cnt, ui num_cover) {
+    BSXIndex(const Graph*q_graph, ui d_num, Edges ***index, ui **cans, ui *cans_cnt, ui num_cover) {
         q_graph_ = q_graph;
-        d_graph_ = d_graph;
         num_cover_ = num_cover;
         auto qnum = q_graph->getVerticesCount();
-        auto dnum = d_graph->getVerticesCount();
-        auto num_indep = qnum - num_cover;
+        this->dnum = d_num;
         index_ = new stack<Edges*>*[qnum];
         batch_info = new BatchInfo[qnum];
         visited_u = new bool[qnum];
@@ -257,12 +224,12 @@ public:
     // get Neighbors of v(can of u_1) from u_1 to u_2
     // used to generate valid cans, by union nbrs, 24-3-7
     const VertexID* getNeighbors(VertexID u_1, VertexID u_2, VertexID v, ui& nbrs_cnt) {
-        auto v_idx = b_search::search(index_cans_[u_1], index_cnt_[u_1], v);
-        if (v_idx == (ui)-1) {
+        auto v_idx = b_search::lower_bound_idx(index_cans_[u_1], index_cnt_[u_1], v);
+        if (v_idx == index_cnt_[u_1] || index_cans_[u_1][v_idx] != v) {
             cout << "can't find " << v << " in index_cans_[" << u_1 << "]: ";
             for (ui i = 0; i < index_cnt_[u_1]; i++) cout << index_cans_[u_1][i] << ", ";
             cout << endl;
-            exit(1);
+            exit(-1);
         }
         auto& edges = *(index_[u_1][u_2].top());
         nbrs_cnt = edges.offset_[v_idx+1] - edges.offset_[v_idx];
@@ -277,10 +244,10 @@ public:
         auto unbrs = q_graph_->getVertexNeighbors(u, unbrs_cnt);
         for (ui i = 0; i < unbrs_cnt; i++ ) {
             auto& edges = *(index_[u][unbrs[i]].top());
-            auto v_idx = b_search::search(valid_cans_[u].top(), valid_cnt_[u].top(), v);
-            if (v_idx == (ui)-1) {
+            auto v_idx = b_search::lower_bound_idx(valid_cans_[u].top(), valid_cnt_[u].top(), v);
+            if (v_idx == valid_cnt_[u].top() || valid_cans_[u].top()[v_idx] != v) {
                 cout << "BSXIndex::getNeighbors_uv::v_idx == (ui)-1" << endl;
-                exit(1);
+                exit(-1);
             }
             for (ui k = edges.offset_[v_idx]; k < edges.offset_[v_idx+1]; k++) {
                 nbrs.emplace(edges.edge_[k]);
@@ -301,8 +268,8 @@ public:
         bool* nbr_updated = new bool[q_num];
         std::copy(visited_u, visited_u+q_num, nbr_updated);
         nbr_updated[cur_u] = false;
-        ui* cans_idx = new ui[d_graph_->getVerticesCount()];
-        memset(cans_idx, 0, sizeof(ui)*d_graph_->getVerticesCount());
+        ui* cans_idx = new ui[dnum];
+        memset(cans_idx, 0, sizeof(ui)*dnum);
         vector<VertexID> updated_cans_idx;  // used to recover cans_idx
         vector<ui> temp_edges;  // used to record & build edge.edge_
 

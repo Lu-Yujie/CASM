@@ -40,7 +40,7 @@ namespace NodeSim {
       ui landmark_idx = nbrs_sorted[i].second;
       landmarks.emplace_back(landmark_idx);
     }
-    return move(landmarks);
+    return landmarks;
   }
   /**
    * compute the similarity of each landmark(max:9):lms0,lsm1,...,lsm15(landmark score)
@@ -53,7 +53,7 @@ namespace NodeSim {
     lsh_values.reserve(num_node);
     for (ui i = 0; i < num_node; i++) {
       int64_t score = 0;
-      int scale = 1e15;
+      int64_t scale = 1e15;
       for (auto& landmark_idx:landmarks) {
         // compute the #same_nbrs for each landmarks
         int lscore = 0;
@@ -77,7 +77,7 @@ namespace NodeSim {
       }
       lsh_values.emplace_back(score);
     }
-    return move(lsh_values);
+    return lsh_values;
   }
 
   vector<int64_t>
@@ -148,7 +148,7 @@ namespace NodeSim {
       }
       lsh_values.emplace_back(score);
     }
-    return move(lsh_values);
+    return lsh_values;
   }
 
 } // namespace NodeSimilarity

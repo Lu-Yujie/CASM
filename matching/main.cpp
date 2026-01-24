@@ -2,31 +2,24 @@
 #include <fstream>
 
 #include "graph/graph.h"
-#include "GenerateFilteringPlan.h"
-#include "FilterVertices.h"
-#include "BuildEdgeIndex.h"
-#include "GenerateQueryPlan.h"
-#include "EvaluateQuery.h"
 #include "timeOp.h"
 #include "utils/CLI11.hpp"
+#include "CSMEngine.h"
 
 #define NANOSECTOSEC(elapsed_time) ((elapsed_time)/(double)1000000000)
 #define BYTESTOMB(memory_cost) ((memory_cost)/(double)(1024 * 1024))
 
 int main(int argc, char** argv) {
     CLI::App app{"App description"};
-    std::string query_file, data_file, stream_file, filter_type, order_type,
-                engine_type, max_embedding_num;
+    std::string query_file, data_file, stream_file, max_embedding_num, output_file;
     int64_t time_limit; // 1000ms by default
 
     app.add_option("-q,--query", query_file, "query graph file")->required();
     app.add_option("-d,--data", data_file, "initial data graph file")->required();
     app.add_option("-u,--update", stream_file, "data graph update stream file")->required();
-    app.add_option("-filter", filter_type, "filter type")->default_val("CFL");
-    app.add_option("-order", order_type, "order type")->default_val("GQL");
-    app.add_option("-engine", engine_type, "engine type")->default_val("BSX");
-    app.add_option("-time_limit", time_limit, "time limit(millisecond)")->default_val(1000);
-    app.add_option("-num", max_embedding_num, "max embedding number");
+    app.add_option("-t,--time_limit", time_limit, "time limit(millisecond)")->default_val(300000);  // 300s
+    app.add_option("-n,--num", max_embedding_num, "max embedding number")->default_val("MAX");
+    app.add_option("-o,--output_file", output_file, "output file")->default_val("./output.csv");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -37,9 +30,6 @@ int main(int argc, char** argv) {
     std::cout << "\tData Graph: " << data_file << std::endl;
     std::cout << "\tQuery Graph: " << query_file << std::endl;
     std::cout << "\tUpdate File: " << stream_file << std::endl;
-    std::cout << "\tFilter Type: " << filter_type << std::endl;
-    std::cout << "\tOrder Type: " << order_type << std::endl;
-    std::cout << "\tEngine Type: " << engine_type << std::endl;
     std::cout << "\tOutput Limit: " << max_embedding_num << std::endl;
     std::cout << "\tTime Limit (millisecond): " << time_limit << std::endl;
     std::cout << "--------------------------------------------------------------------" << std::endl;
@@ -48,7 +38,6 @@ int main(int argc, char** argv) {
      * Load input graphs.
      */
     std::cout << "Load graphs..." << std::endl;
-
     auto start = std::chrono::high_resolution_clock::now();
 
     Graph* query_graph = new Graph(true);
@@ -59,156 +48,63 @@ int main(int argc, char** argv) {
     Graph* data_graph = new Graph(true);
     data_graph->loadGraphFromFile(data_file);
 
-    std::vector<Update> stream;
-    data_graph->load_stream(stream_file, stream);
+    std::vector<Update> updates;
+    data_graph->load_updates(stream_file, updates);
+    auto update_cnt = updates.size();
 
     auto end = std::chrono::high_resolution_clock::now();
-
     double load_graphs_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
-    std::cout << "-----" << std::endl;
-    std::cout << "Query Graph Meta Information" << std::endl;
+    std::cout << "----- Query Graph Meta" << std::endl;
     query_graph->printGraphMetaData();
-    std::cout << "-----" << std::endl;
+    std::cout << "----- Data Graph Meta" << std::endl;
     data_graph->printGraphMetaData();
-
+    std::cout << "----- # Updates:" << update_cnt;
     std::cout << "--------------------------------------------------------------------" << std::endl;
 
     /**
      * Start queries.
      */
     std::cout << "Start queries..." << std::endl;
-    std::cout << "-----" << std::endl;
-    std::cout << "Filter candidates..." << std::endl;
     /**
      * init variables, set limits
      */
+    vector<mpz_t> embedding_cnts(update_cnt);
+    for (auto& embedding_cnt :embedding_cnts) mpz_init_set_ui(embedding_cnt, 0);
     size_t output_limit = 0;
-    mpz_t embedding_cnt;
-    size_t call_count = 0;
-    auto end_time = TimeOp::getClockNan();
-    end_time += time_limit * 1000 * 1000;
     if (max_embedding_num == "MAX") {
         output_limit = numeric_limits<uint64_t>::max();
-    }
-    else {
+    } else {
         sscanf(max_embedding_num.c_str(), "%zu", &output_limit);
     }
+    auto end_time = TimeOp::getClockNan();
+    end_time += time_limit * 1000 * 1000;
 
+    std::cout << "Build auxiliary structure..." << std::endl;
     start = std::chrono::high_resolution_clock::now();
 
-    ui** candidates = nullptr;
-    ui* candidates_count = nullptr;
-    ui* cfl_order = nullptr;
-    TreeNode* cfl_tree = nullptr;
-    ui* dpiso_order = nullptr;
-    TreeNode* dpiso_tree = nullptr;
-    std::vector<std::unordered_map<VertexID, std::vector<VertexID >>> TE_Candidates;
-    std::vector<std::vector<std::unordered_map<VertexID, std::vector<VertexID>>>> NTE_Candidates;
-    if (filter_type == "LDF") {
-        FilterVertices::LDFFilter(data_graph, query_graph, candidates, candidates_count);
-    } else if (filter_type == "NLF") {
-        FilterVertices::NLFFilter(data_graph, query_graph, candidates, candidates_count);
-    } else if (filter_type == "CFL") {
-        FilterVertices::CFLFilter(data_graph, query_graph, candidates, candidates_count, cfl_order, cfl_tree);
-    } else if (filter_type == "DPiso") {
-        FilterVertices::DPisoFilter(data_graph, query_graph, candidates, candidates_count, dpiso_order, dpiso_tree);
-    } else {
-        std::cout << "The specified filter type '" << filter_type << "' is not supported." << std::endl;
-        exit(-1);
-    }
-
-    // Sort the candidates to support the set intersections
-    FilterVertices::sortCandidates(candidates, candidates_count, query_graph->getVerticesCount());
+    CSMEngine* csmEngine = new CSMEngine;
+    csmEngine->init(data_graph, query_graph);
 
     end = std::chrono::high_resolution_clock::now();
-    double filter_vertices_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    double preprocessing_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
-    std::cout << "-----" << std::endl;
-    std::cout << "Build indices..." << std::endl;
-
+    std::cout << "Scan streams..." << std::endl;
     start = std::chrono::high_resolution_clock::now();
 
-    Edges ***edge_matrix = nullptr;
-    edge_matrix = new Edges **[query_graph->getVerticesCount()];
-    for (ui i = 0; i < query_graph->getVerticesCount(); ++i) {
-        edge_matrix[i] = new Edges *[query_graph->getVerticesCount()];
-    }
-
-    if (engine_type != "BSX") {
-        BuildEdgeIndex::buildCansIdxIndex(data_graph, query_graph, candidates, candidates_count, edge_matrix);
-    } else {
-        BuildEdgeIndex::buildCansIndex(data_graph, query_graph, candidates, candidates_count, edge_matrix);
-    }
-
-    end = std::chrono::high_resolution_clock::now();
-    double build_table_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-
-    std::cout << "-----" << std::endl;
-    std::cout << "Generate a matching order..." << std::endl;
-
-    start = std::chrono::high_resolution_clock::now();
-
-    ui* matching_order = nullptr;
-    ui* pivots = nullptr;
-
-    if (order_type == "GQL") {
-        GenerateQueryPlan::generateGQLQueryPlan(data_graph, query_graph, candidates_count, matching_order, pivots);
-    } else {
-        std::cout << "The specified order type '" << order_type << "' is not supported." << std::endl;
-    }
-
-    end = std::chrono::high_resolution_clock::now();
-    double generate_query_plan_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-
-    GenerateQueryPlan::checkQueryPlanCorrectness(query_graph, matching_order, pivots);
-    GenerateQueryPlan::printSimplifiedQueryPlan(query_graph, matching_order);
-
-    std::cout << "-----" << std::endl;
-    std::cout << "Enumerate..." << std::endl;
-    start = std::chrono::high_resolution_clock::now();
-
-    if (engine_type == "BS1") {
-        EvaluateQuery::BS1Engine(data_graph, query_graph, edge_matrix, candidates, candidates_count,
-                                 matching_order, pivots, output_limit, call_count, embedding_cnt, end_time);
-    } else if (engine_type == "BSX") {
-        EvaluateQuery::BSXEngine(data_graph, query_graph, edge_matrix, candidates, candidates_count,
-                                 matching_order, output_limit, call_count, embedding_cnt, end_time);
-    } else {
-        std::cout << "The specified engine type '" << engine_type << "' is not supported." << std::endl;
-        exit(-1);
+    ui processed_edges_cnt = 0;
+    for (; processed_edges_cnt < update_cnt; processed_edges_cnt++) {
+        auto& update_edge = updates[processed_edges_cnt];
+        auto& embedding_cnt = embedding_cnts[processed_edges_cnt];
+        csmEngine->query(update_edge, output_limit, embedding_cnt, end_time);
+        gmp_printf("#%d Embeddings: %Zd, ", processed_edges_cnt, embedding_cnt);
+        if (TimeOp::getClockNan() >= end_time) break;
     }
 
     end = std::chrono::high_resolution_clock::now();
     double enumeration_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
-    std::cout << "--------------------------------------------------------------------" << std::endl;
-    std::cout << "Release memories..." << std::endl;
-    /**
-     * Release the allocated memories.
-     */
-    delete[] candidates_count;
-    delete[] cfl_order;
-    delete[] cfl_tree;
-    delete[] dpiso_order;
-    delete[] dpiso_tree;
-    delete[] matching_order;
-    delete[] pivots;
-    for (ui i = 0; i < query_graph->getVerticesCount(); ++i) {
-        delete[] candidates[i];
-    }
-    delete[] candidates;
-
-    if (edge_matrix != nullptr) {
-        for (ui i = 0; i < query_graph->getVerticesCount(); ++i) {
-            for (ui j = 0; j < query_graph->getVerticesCount(); ++j) {
-                delete edge_matrix[i][j];
-            }
-            delete[] edge_matrix[i];
-        }
-        delete[] edge_matrix;
-    }
-
+    delete csmEngine;
     delete query_graph;
     delete data_graph;
 
@@ -216,46 +112,42 @@ int main(int argc, char** argv) {
      * End.
      */
     std::cout << "--------------------------------------------------------------------" << std::endl;
-    double preprocessing_time_in_ns = filter_vertices_time_in_ns + build_table_time_in_ns + generate_query_plan_time_in_ns;
     double total_time_in_ns = preprocessing_time_in_ns + enumeration_time_in_ns;
-
-    printf("Load graphs time (seconds): %.4lf\n", NANOSECTOSEC(load_graphs_time_in_ns));
-    printf("Filter vertices time (seconds): %.4lf\n", NANOSECTOSEC(filter_vertices_time_in_ns));
-    printf("Build table time (seconds): %.4lf\n", NANOSECTOSEC(build_table_time_in_ns));
-    printf("Generate query plan time (seconds): %.4lf\n", NANOSECTOSEC(generate_query_plan_time_in_ns));
-    printf("Enumerate time (seconds): %.4lf\n", NANOSECTOSEC(enumeration_time_in_ns));
-    printf("Preprocessing time (seconds): %.4lf\n", NANOSECTOSEC(preprocessing_time_in_ns));
-    printf("Total time (seconds): %.4lf\n", NANOSECTOSEC(total_time_in_ns));
-    gmp_printf("#Embeddings: %Zd\n", embedding_cnt);
-    printf("Call Count: %zu\n", call_count);
-    printf("Per Call Count Time (nanoseconds): %.4lf\n", enumeration_time_in_ns / (call_count == 0 ? 1 : call_count));
-    std::cout << "End." << std::endl;
+    mpz_t total_embeddings;
+    mpz_init_set_ui(total_embeddings, 0);
+    for (auto& embedding_cnt : embedding_cnts) mpz_add(total_embeddings, total_embeddings, embedding_cnt);
+    std::cout << "Load graphs time (seconds): " << NANOSECTOSEC(load_graphs_time_in_ns) << std::endl;
+    std::cout << "Preprocessing time (seconds): " << NANOSECTOSEC(preprocessing_time_in_ns) << std::endl;
+    std::cout << "Enumerate time (seconds): " << NANOSECTOSEC(enumeration_time_in_ns) << std::endl;
+    std::cout << "Total time (seconds): " << NANOSECTOSEC(total_time_in_ns) << std::endl;
+    std::cout << "processed edges: " << processed_edges_cnt << "/" << update_cnt << std::endl;
+    gmp_printf("#Total Embeddings: %Zd, ", total_embeddings);
+    std::cout << "\nEnd." << std::endl;
 
     /**
      * Set the output stream and record the command line information
      */
     std::fstream output;
-    output.open("./bsx_output.csv", std::ios::out | std::ios::app);
-
+    char* cnt = new char[2048];
+    output.open(output_file, std::ios::out | std::ios::app);
     output << query_file;
     output << "," << data_file;
-    output << "," << filter_type;
-    output << "," << order_type;
-    output << "," << engine_type;
     output << "," << NANOSECTOSEC(load_graphs_time_in_ns);
-    output << "," << NANOSECTOSEC(filter_vertices_time_in_ns);
-    output << "," << NANOSECTOSEC(build_table_time_in_ns);
-    output << "," << NANOSECTOSEC(generate_query_plan_time_in_ns);
-    output << "," << NANOSECTOSEC(enumeration_time_in_ns);
     output << "," << NANOSECTOSEC(preprocessing_time_in_ns);
+    output << "," << NANOSECTOSEC(enumeration_time_in_ns);
     output << "," << NANOSECTOSEC(total_time_in_ns);
-    char *cnt = mpz_get_str(NULL, 10, embedding_cnt);
+    output << "," << processed_edges_cnt << "/" << update_cnt;
+    for (auto& embedding_cnt : embedding_cnts) {
+        mpz_get_str(cnt, 10, embedding_cnt);
+        output << "," << cnt;
+    }
+    mpz_get_str(cnt, 10, total_embeddings);
     output << "," << cnt;
-    output << "," << call_count;
     output << std::endl;
-    
     output.close();
-    free(cnt);
+    delete[] cnt;
+    for (auto& embedding_cnt :embedding_cnts) mpz_clear(embedding_cnt);
+    mpz_clear(total_embeddings);
 
     return 0;
 }

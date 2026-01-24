@@ -9,7 +9,7 @@ public:
                           int* queue, int* previous, int n, int m);
     static void bfsTraversal(const Graph *graph, VertexID root_vertex, TreeNode *&tree, VertexID *&bfs_order);
     static void dfsTraversal(TreeNode* tree, VertexID root_vertex, ui node_num, VertexID* &dfs_order);
-    static void compute_degeneracy_order(const Graph* graph, uint32_t* degeneracy_order);
+    static void compute_automorphism(const Graph* graph, std::vector<std::vector<uint32_t>>& embeddings);
 private:
     static void old_cheap(int* col_ptrs, int* col_ids, int* match, int* row_match, int n, int m);
     static void dfs(TreeNode* tree, VertexID cur_vertex, VertexID* dfs_order, ui& count);

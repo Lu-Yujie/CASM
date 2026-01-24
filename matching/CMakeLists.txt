@@ -1,9 +1,8 @@
 set(SUBGRAPH_MATCHING_FILE_LIST
-        FilterVertices.cpp
-        BuildEdgeIndex.cpp
-        GenerateQueryPlan.cpp
         EvaluateQuery.cpp
-        GenerateFilteringPlan.cpp
+        BuildEdgeIndex.cpp
+        CSMEngine.cpp
+        CSMIndex.cpp
         main.cpp)
 
 add_executable(BS ${SUBGRAPH_MATCHING_FILE_LIST})

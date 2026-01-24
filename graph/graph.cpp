@@ -7,19 +7,19 @@
 #include <utils/graphoperations.h>
 
 void Graph::BuildReverseIndex() {
-    reverse_index_ = new ui[vertices_count_];
-    reverse_index_offsets_= new ui[vlabels_count_ + 1];
-    reverse_index_offsets_[0] = 0;
+    label2v_ = new ui[vertices_count_];
+    label2v_offsets_= new ui[vlabels_count_ + 1];
+    label2v_offsets_[0] = 0;
 
     ui total = 0;
     for (ui i = 0; i < vlabels_count_; ++i) {
-        reverse_index_offsets_[i + 1] = total;
+        label2v_offsets_[i + 1] = total;
         total += vlabels_frequency_[i];
     }
 
     for (ui i = 0; i < vertices_count_; ++i) {
         LabelID vlabel = vlabels_[i];
-        reverse_index_[reverse_index_offsets_[vlabel + 1]++] = i;
+        label2v_[label2v_offsets_[vlabel + 1]++] = i;
     }
 }
 
@@ -145,14 +145,13 @@ void Graph::loadGraphFromFile(const std::string &file_path) {
     }
 
     BuildReverseIndex();
-    buildEdgeIndex();
 
     if (enable_vlabel_offset_) {
         BuildNLF();
     }
 }
 
-void Graph::load_stream(const std::string& file_path, std::vector<Update>& stream) {
+void Graph::load_updates(const std::string& file_path, std::vector<Update>& stream) {
     uint32_t vertex_num = this->getVerticesCount();
     spp::sparse_hash_map<uint32_t, uint32_t> new_vertex_label;
     Update update;
@@ -168,6 +167,7 @@ void Graph::load_stream(const std::string& file_path, std::vector<Update>& strea
         std::stringstream ss;
         std::string op_str;
         std::getline(ifs, tmp_str);
+        if (tmp_str == "") break;
 
         if (tmp_str[0] != '#') {
             ss.clear();
@@ -194,12 +194,12 @@ void Graph::load_stream(const std::string& file_path, std::vector<Update>& strea
                 ss >> first >> second;
                 update.edge_.vertices_[0] = first;
                 update.edge_.vertices_[1] = second;
-                update.labels_.src_label_ = first < vertex_num
-                                            ? this->getVertexLabel(first)
-                                            : new_vertex_label[first];
-                update.labels_.dst_label_ = second < vertex_num
-                                            ? this->getVertexLabel(second)
-                                            : new_vertex_label[second];
+                update.edge_.elabel_.src_label_ = first < vertex_num
+                                                  ? this->getVertexLabel(first)
+                                                  : new_vertex_label[first];
+                update.edge_.elabel_.dst_label_ = second < vertex_num
+                                                  ? this->getVertexLabel(second)
+                                                  : new_vertex_label[second];
 
                 stream.emplace_back(update);
             } else {
@@ -226,32 +226,4 @@ void Graph::buildCoreTable() {
             core_length_ += 1;
         }
     }
-}
-
-void Graph::buildEdgeIndex() {
-    edge_index_ = new sparse_hash_map<uint64_t, std::vector<Edge>*>();
-
-    Edge cur_edge;
-    for (uint32_t u = 0; u < vertices_count_; ++u) {
-        uint32_t u_l = getVertexLabel(u);
-
-        uint32_t u_nbrs_cnt;
-        const uint32_t* u_nbrs = getVertexNeighbors(u, u_nbrs_cnt);
-
-        cur_edge.vertices_[0] = u;
-
-        for (uint32_t i = 0; i < u_nbrs_cnt; ++i) {
-            uint32_t v = u_nbrs[i];
-            uint32_t v_l = getVertexLabel(v);
-
-            uint64_t key = (uint64_t) u_l << 32 | v_l;
-            cur_edge.vertices_[1] = v;
-
-            if (!edge_index_->contains(key)) {
-                (*edge_index_)[key] = new std::vector<Edge>();
-            }
-            (*edge_index_)[key]->emplace_back(cur_edge);
-        }
-    }
-
 }

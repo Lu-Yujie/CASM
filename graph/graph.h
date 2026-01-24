@@ -27,14 +27,13 @@ private:
     ui* offsets_;
     VertexID * neighbors_;
     LabelID* vlabels_;  // v->label
-    ui* reverse_index_offsets_;
-    VertexID* reverse_index_;  // label->v
+    ui* label2v_offsets_;
+    VertexID* label2v_;  // label->v
 
     int* core_table_;
     ui core_length_;
 
     std::unordered_map<LabelID, ui> vlabels_frequency_;
-    sparse_hash_map<uint64_t, std::vector<Edge>* >* edge_index_;
 
     ui* vlabels_offsets_;
 
@@ -60,11 +59,10 @@ public:
         offsets_ = nullptr;
         neighbors_ = nullptr;
         vlabels_ = nullptr;
-        reverse_index_offsets_ = nullptr;
-        reverse_index_ = nullptr;
+        label2v_offsets_ = nullptr;
+        label2v_ = nullptr;
         core_table_ = nullptr;
         vlabels_frequency_.clear();
-        edge_index_ = nullptr;
         vlabels_offsets_ = nullptr;
         nlf_ = nullptr;
     }
@@ -73,17 +71,16 @@ public:
         delete[] offsets_;
         delete[] neighbors_;
         delete[] vlabels_;
-        delete[] reverse_index_offsets_;
-        delete[] reverse_index_;
+        delete[] label2v_offsets_;
+        delete[] label2v_;
         delete[] core_table_;
-        delete edge_index_;
         delete[] vlabels_offsets_;
         delete[] nlf_;
     }
 
 public:
     void loadGraphFromFile(const std::string& file_path);
-    void load_stream(const std::string& file_path, std::vector<Update>& stream);
+    void load_updates(const std::string& file_path, std::vector<Update>& stream);
     void printGraphMetaData();
 public:
     const ui getLabelsCount() const {
@@ -130,13 +127,9 @@ public:
         return neighbors_ + offsets_[id];
     }
 
-    const sparse_hash_map<uint64_t, std::vector<Edge>*>* getEdgeIndex() const {
-        return edge_index_;
-    }
-
     const ui * getVerticesByLabel(const LabelID id, ui& count) const {
-        count = reverse_index_offsets_[id + 1] - reverse_index_offsets_[id];
-        return reverse_index_ + reverse_index_offsets_[id];
+        count = label2v_offsets_[id + 1] - label2v_offsets_[id];
+        return label2v_ + label2v_offsets_[id];
     }
 
     const ui * getEdges() const {
@@ -199,8 +192,6 @@ public:
     }
 
     void buildCoreTable();
-
-    void buildEdgeIndex();
 };
 
 
