@@ -1,7 +1,7 @@
 #include "QueryEngine.h"
 #include "utils/bsx/IndepSet.h"
 #include "utils/bsx/nodeSim.h"
-#include "utils/SetOp.h"
+#include "utils/setOp.h"
 #include <stack>
 #include <vector>
 #include <cstring>

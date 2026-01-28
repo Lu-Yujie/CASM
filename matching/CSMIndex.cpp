@@ -1,8 +1,9 @@
 #include "CSMIndex.h"
-#include "utils/SetOp.h"
+#include "utils/setOp.h"
 #include "utils/bSearch.h"
 #include "BuildAux.h"
-#include<set>
+#include <set>
+#include "assert.h"
 using namespace std;
 
 const vector<VertexID>& Aux::getNeighbors(VertexID u_1, VertexID u_2, VertexID v) const {
@@ -64,13 +65,12 @@ void Aux::update(const Aux& global) {
 }
 
 CSMPruneCache* CSMIndex::pruneCache = nullptr;
-CSMPruneCache::CSMPruneCache(ui max_cans, ui qnum) {
+CSMPruneCache::CSMPruneCache(ui max_cans, ui qnum, ui dnum) {
     order = new VertexID[qnum];
     visited.resize(qnum);
-    u_cans_nbrs.reserve(max_cans);
-    results_buffer.reserve(max_cans);
-    aux_cursors.reserve(max_cans);
-    aux_queue.reserve(max_cans);
+    flag_array.resize(dnum, 0);
+    reset_buffer.reserve(dnum);
+    valid_cans_buffer.reserve(max_cans);
 }
 
 // 只选择符合要求的边，然后构建辅助数据结构。以边为主要过滤条件，且不做传播剪枝
@@ -121,7 +121,7 @@ void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
     for (ui i = 0; i < qnum; ++i) sort(cans[i].begin(), cans[i].end());
     aux.init(data_graph, query_graph);
 
-    pruneCache = new CSMPruneCache(max_cans, qnum);
+    pruneCache = new CSMPruneCache(max_cans, qnum, dnum);
 }
 
 // --- 核心逻辑：确保候选点存在，若不存在则更新全局并同步所有邻居 ---
@@ -131,12 +131,11 @@ ui CSMIndex::ensure_candidate_global(ui u, ui v_can) {
     auto& u_cans = aux.cans[u];
 
     // 1. 查找位置 & insert
-    auto it = std::lower_bound(u_cans.begin(), u_cans.end(), v_can);
-    ui idx = std::distance(u_cans.begin(), it);
-    if (it != u_cans.end() && *it == v_can) {
+    ui idx = b_search::lower_bound_idx(u_cans, v_can);
+    if (idx < u_cans.size() && u_cans[idx] == v_can) {
         return idx;
     }
-    u_cans.insert(it, v_can);
+    u_cans.insert(u_cans.begin() + idx, v_can);
 
     // 2. 同步更新 u 的所有邻居的 edge_matrix
     // 即使不是当前正在处理的边，也需要插入一个空行，以保持 offset 索引与 cans 一致
@@ -161,9 +160,9 @@ ui CSMIndex::find_candidate_index(ui u, ui v_can) {
     auto& u_cans = aux.cans[u];
     if (u_cans.empty()) return -1;
 
-    auto it = std::lower_bound(u_cans.begin(), u_cans.end(), v_can);
-    if (it != u_cans.end() && *it == v_can) {
-        return std::distance(u_cans.begin(), it);
+    ui idx = b_search::lower_bound_idx(u_cans, v_can);
+    if (idx < u_cans.size() && u_cans[idx] == v_can) {
+        return idx;
     }
     return -1;
 }
@@ -173,10 +172,9 @@ void CSMIndex::insert_edge_at_index(CSMEdges* edges, ui row_idx, ui v_nbr) {
     if (edges == nullptr) return;
 
     auto& row = edges->edge_[row_idx];
-    auto it = std::lower_bound(row.begin(), row.end(), v_nbr);
-
-    if (it == row.end() || *it != v_nbr) {
-        row.insert(it, v_nbr);
+    ui idx = b_search::lower_bound_idx(row, v_nbr);
+    if (idx == row.size() || row[idx] != v_nbr) {
+        row.insert(row.begin() + idx, v_nbr);
     }
 }
 
@@ -185,10 +183,9 @@ void CSMIndex::delete_edge_at_index(CSMEdges* edges, ui row_idx, ui v_nbr) {
     if (edges == nullptr) return;
 
     auto& row = edges->edge_[row_idx];
-    auto it = std::lower_bound(row.begin(), row.end(), v_nbr);
-
-    if (it != row.end() && *it == v_nbr) {
-        row.erase(it);
+    ui idx = b_search::lower_bound_idx(row, v_nbr);
+    if (idx < row.size() && row[idx] == v_nbr) {
+        row.erase(row.begin() + idx);
     }
 }
 
@@ -213,16 +210,17 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
         if (op == '+') {  // === 插入操作 ===
             if (v_src >= dnum) dnum = v_src + 1;
             if (v_dst >= dnum) dnum = v_dst + 1;
-            
+
             // 1. 确保候选点存在 (会触发全局同步)
             ui src_idx = ensure_candidate_global(u_src, v_src);
             ui dst_idx = ensure_candidate_global(u_dst, v_dst);
+            // assert(aux.cans[u_src].size() == aux.data[u_src][u_dst]->edge_.size());
+            // assert(aux.cans[u_dst].size() == aux.data[u_dst][u_src]->edge_.size());
 
             // 2. 插入边
             insert_edge_at_index(all_edges[u_src][u_dst], src_idx, v_dst);
             insert_edge_at_index(all_edges[u_dst][u_src], dst_idx, v_src);
         } else if (op == '-') {  // === 删除操作 ===
-
             // 1. 查找候选点位置
             ui src_idx = find_candidate_index(u_src, v_src);
             ui dst_idx = find_candidate_index(u_dst, v_dst);
@@ -235,72 +233,13 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
     }
 }
 
-bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
-    auto& qnum = aux.qnum;
-    bool valid = true;
-    auto& order = pruneCache->order;
-    auto& global_cans = global->aux.cans;
-    auto& local_cans = this->aux.cans;
-    auto& visited = pruneCache->visited;
-
-    auto d_src = de.src();
-    auto d_dst = de.dst();
-    auto q_src = qe.src();
-    auto q_dst = qe.dst();
-
-    // 1. 初始化容器
-    local_cans.resize(qnum);
-
-    // 2. 重置 visited 标记
-    visited.resize(qnum);
-    std::fill(visited.begin(), visited.end(), false);
-
-    // 3. 设置种子点 (Seeds) 并标记为已访问
-    local_cans[q_src].clear();
-    local_cans[q_src].push_back(d_src);
-    visited[q_src] = true;
-    local_cans[q_dst].clear();
-    local_cans[q_dst].push_back(d_dst);
-    visited[q_dst] = true;
-
-    // --- 3. 1-Hop Neighbor Quick Prune ---
-    if (!edge_quick_prune(global, de, qe)) return false;
-
-    // 4. 构建处理顺序 (启发式：Candidates 少的优先)
-    for (ui i = 0; i < qnum; i++) order[i] = i;
-
-    sort(order, order+qnum, [&](ui id_a, ui id_b) {
-        size_t size_a = visited[id_a] ? local_cans[id_a].size() : global_cans[id_a].size();
-        size_t size_b = visited[id_b] ? local_cans[id_b].size() : global_cans[id_b].size();
-        return size_a < size_b;
-    });
-
-    // Pass 1: Forward Prune
-    for (ui idx = 0; idx < qnum && valid; idx++) {
-        auto u = order[idx];
-        valid = csm_prune(u, global);
-    }
-    // Pass 2: Backward Prune
-    ui idx = qnum;
-    while (idx > 0 && valid) {
-        idx--;
-        auto u = order[idx];
-        valid = csm_prune(u, global);
-    }
-
-    if (!valid) return false;
-
-    // 5. 构建 Local Edge Matrix
-    this->aux.update(global->aux); 
-
-    return true;
-}
-
-// 辅助：将确定匹配点 (u_fixed -> v_fixed) 的约束传播给 u_fixed 的邻居
+// --- 辅助：种子点约束传播 (Seed Propagation) ---
+// 将确定匹配点 (u_fixed -> v_fixed) 的约束传播给 u_fixed 的所有邻居
 bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed) {
     auto& query_graph = aux.query_graph;
     auto& local_cans = this->aux.cans;
     auto& visited = pruneCache->visited;
+    auto& bfs_q = pruneCache->bfs_q; // 需要用到队列将新波及的点入队
 
     ui unbr_cnt = 0;
     const VertexID* unbrs = query_graph->getVertexNeighbors(u_fixed, unbr_cnt);
@@ -308,16 +247,16 @@ bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed,
     for (ui i = 0; i < unbr_cnt; ++i) {
         ui unbr = unbrs[i];
 
-        // 调用 Global Index 直接获取合法的候选点列表
+        // 获取约束下的合法候选集
         const vector<VertexID>& valid_candidates = global->aux.getNeighbors(u_fixed, unbr, v_fixed);
         if (valid_candidates.empty()) return false;
 
-        if (!visited[unbr]) {
-            // Case A: 第一次访问该邻居 -> 直接赋值 (Copy)
-            local_cans[unbr] = valid_candidates;
+        bool updated = false;
+        if (!visited[unbr]) {  // 第一次访问该邻居, 直接赋值
+            local_cans[unbr] = valid_candidates; 
             visited[unbr] = true;
-        } else {
-            // Case B: 已经访问过 (例如是三角形的另一个顶点，或者已被另一个端点约束过) -> 求交集
+            bfs_q.push(unbr);
+        } else {  // 已经访问过, 求交
             SetOp::intersectAndUpdate(local_cans[unbr], valid_candidates);
             if (local_cans[unbr].empty()) return false;
         }
@@ -325,88 +264,124 @@ bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed,
     return true;
 }
 
+// --- 快速剪枝 ---
 bool CSMIndex::edge_quick_prune(const CSMIndex* global, Edge de, Edge qe) {
     if (!propagate_neighbor_constraint(global, qe.src(), de.src())) return false;
     if (!propagate_neighbor_constraint(global, qe.dst(), de.dst())) return false;
     return true;
 }
 
-bool CSMIndex::csm_prune(ui u, const CSMIndex* global) {
-    // 获取 Cache 资源
-    auto& u_cans_nbrs = pruneCache->u_cans_nbrs;          // pointer array
-    auto& results_buffer = pruneCache->results_buffer;
-    auto& aux_cursors = pruneCache->aux_cursors;
-    auto& aux_queue = pruneCache->aux_queue;
-    auto& visited = pruneCache->visited;
-
-    auto& query_graph = aux.query_graph; 
+// --- 通用前向传播 (BFS Step) ---
+bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
     auto& local_cans = this->aux.cans;
-    const auto& global_cans = global->aux.cans;
+    auto& flag_array = pruneCache->flag_array;
+    auto& reset_buffer = pruneCache->reset_buffer;
+    auto& dnum = global->aux.dnum;
 
-    // --- A. Lazy Initialization ---
-    if (!visited[u]) {
-        local_cans[u] = global_cans[u]; // vector deep copy
-        visited[u] = true;
+    // 1. 清理 buffer
+    reset_buffer.clear(); 
+
+    // 2. Push & Deduplicate
+    const auto& u_current_cans = local_cans[u];
+    for (VertexID u_can : u_current_cans) {
+        const vector<VertexID>& valid_neighbors = global->aux.getNeighbors(u, unbr, u_can);
+        for (VertexID v_nbr : valid_neighbors) {
+            if (flag_array[v_nbr] == 0) {  // 去重
+                flag_array[v_nbr] = 1;
+                reset_buffer.push_back(v_nbr); 
+            }
+        }
     }
-    if (local_cans[u].empty()) {
+
+    if (reset_buffer.empty()) {  // 不需要清理 flag_array
         return false;
     }
 
-    ui unbr_cnt = 0;
-    const VertexID* unbrs = query_graph->getVertexNeighbors(u, unbr_cnt);
-    ui valid_cans_cnt = local_cans[u].size(); // 当前有效的 candidates 数量
-
-    // --- B. 遍历查询图邻居 ---
-    for (ui unbr_idx = 0; unbr_idx < unbr_cnt; unbr_idx++) {
-        VertexID unbr = unbrs[unbr_idx];
-
-        // --- C. Hybrid View, 获取邻居的 Candidates ---
-        const vector<VertexID>& unbr_candidates = visited[unbr] ? local_cans[unbr] : global_cans[unbr];
-
-        // 如果邻居连 Candidates 都没有，说明拓扑无法匹配
-        if (unbr_candidates.empty()) {
-            local_cans[u].clear();
-            return false;
-        }
-
-        // --- D. 准备 SetOp 数据 (获取数据图邻接关系) ---
-        for (ui can_idx = 0; can_idx < valid_cans_cnt; can_idx++) {
-            VertexID u_can = local_cans[u][can_idx];
-            const vector<VertexID>& nbrs_vec = global->aux.getNeighbors(u, unbr, u_can);
-            u_cans_nbrs[can_idx] = &nbrs_vec;
-        }
-
-        // --- E. 集合求交 (Semi-join) ---
-        // 验证 u 的每个 candidate 的邻居，是否出现在 unbr_candidates 中
-        SetOp::multi_overlap_no_alloc(u_cans_nbrs, valid_cans_cnt, unbr_candidates,
-                                      results_buffer, aux_cursors, aux_queue);
-
-        // --- F. 压缩 Local Candidates (原地移除无效点) ---
-        ui new_valid = 0;
-        for (ui valid_can_idx = 0; valid_can_idx < valid_cans_cnt; valid_can_idx++) {
-            if (results_buffer[valid_can_idx] == true) {
-                // 保留通过检查的点
-                // 避免自赋值：仅当 new_valid != valid_can_idx 时才赋值
-                if (new_valid != valid_can_idx) {
-                    local_cans[u][new_valid] = local_cans[u][valid_can_idx];
-                }
-                new_valid++;
+    // 3. Update Local Candidates
+    if (!pruneCache->visited[unbr]) {  // unbr 未访问, 将 reset_buffer 作为新的候选集
+        std::sort(reset_buffer.begin(), reset_buffer.end());
+        for (VertexID v : reset_buffer) flag_array[v] = 0;  // clear buffer before swap
+        local_cans[unbr].swap(reset_buffer);
+    } else {  // unbr 已访问, 过滤现有的 local_cans[unbr]，只保留 flag 为 1 的元素
+        auto& target = local_cans[unbr];
+        ui write_idx = 0;
+        for (ui read_idx = 0; read_idx < target.size(); ++read_idx) {
+            VertexID v = target[read_idx];
+            if (flag_array[v] == 1) {
+                target[write_idx++] = v;
             }
         }
-        
-        // 必须 resize，真正释放尾部空间
-        local_cans[u].resize(new_valid);
-        valid_cans_cnt = new_valid; // 更新当前计数
+        target.resize(write_idx);
 
-        // 提前退出：如果当前点已经剪空
-        if (valid_cans_cnt == 0) return false;
+        for (VertexID v : reset_buffer) flag_array[v] = 0;  // clear buffer
+
+        if (target.empty()) return false;
     }
 
-    return valid_cans_cnt > 0;
+    return true;
 }
 
-inline void CSMIndex::copy_block(ui* dst, const ui* src, ui len) {
-    if (len > 0 && src != nullptr && dst != nullptr) {
-        copy(src, src + len, dst);
+// --- 构建局部索引主流程 ---
+bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
+    auto& qnum = aux.qnum;
+    auto& local_cans = this->aux.cans;
+    auto& visited = pruneCache->visited;
+    auto& bfs_q = pruneCache->bfs_q;
+    auto& flag_array = pruneCache->flag_array;
+    auto& dnum = global->aux.dnum;
+    std::fill(visited.begin(), visited.end(), false);
+
+    auto q_src = qe.src();
+    auto q_dst = qe.dst();
+    local_cans[q_src].clear();
+    local_cans[q_src].emplace_back(de.src());
+    visited[q_src] = true;
+    local_cans[q_dst].clear();
+    local_cans[q_dst].emplace_back(de.dst());
+    visited[q_dst] = true;
+
+    // 快速剪枝
+    if (!edge_quick_prune(global, de, qe)) return false;
+
+    // update when necessary
+    if (flag_array.size() < dnum) flag_array.resize(dnum, 0);
+
+    // 传播剪枝
+    while (!bfs_q.empty()) {
+        ui u = bfs_q.front();
+        bfs_q.pop();
+
+        if (local_cans[u].empty()) return false;
+
+        ui unbr_cnt = 0;
+        const VertexID* unbrs = aux.query_graph->getVertexNeighbors(u, unbr_cnt);
+
+        // TODO: 可选优化：对 unbrs 进行排序，优先处理 visited 的点，或者度数小的点
+        for (ui i = 0; i < unbr_cnt; ++i) {
+            ui unbr = unbrs[i];
+
+            // 记录状态，propagate 内部会用
+            bool is_first_visit = !visited[unbr];
+
+            if (!propagate_forward(global, u, unbr)) {
+                return false; 
+            }
+
+            if (is_first_visit) {
+                visited[unbr] = true;
+                bfs_q.push(unbr);
+            }
+        }
     }
+
+    // 5. 孤立点检查 (处理非连通图)
+    for (ui i = 0; i < qnum; ++i) {
+        if (!visited[i]) {
+            local_cans[i] = global->aux.cans[i];
+            visited[i] = true;
+        }
+        if (local_cans[i].empty()) return false;
+    }
+
+    return true;
 }

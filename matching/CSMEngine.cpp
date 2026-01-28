@@ -74,12 +74,11 @@ void CSMEngine::init(const Graph *data_graph, const Graph *query_graph) {
     build_edges_mapping(query_graph);
 }
 
-void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64_t& end_time) {
+// 函数签名修改：添加 QueryStats& stats
+void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64_t& end_time, QueryStats& stats) {
     // 1. 第一步：先收集所有受到该数据边影响的查询边 (matched_edges)
-    // 这一步必须在更新或查询之前完成
     vector<Edge> matched_edges;
     for (auto& edge_group : automorphism_edges_) {
-        // 如果当前同构组的边的 label 与数据边一致，则该组所有边都需要更新索引
         if (edge_group[0].elabel_ == de.edge_.elabel_) {
             for (auto& edge : edge_group) {
                 matched_edges.emplace_back(edge);
@@ -88,48 +87,81 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
     }
 
     // 2. 第二步：如果是插入操作 (+)，必须先更新 Global Index
-    // 这样 try_build_local 和 BSXEngine 才能在索引中“看到”这条新边
     if (de.op_ == '+') {
-        // 注意：这里调用的是上一轮修复后的 update_edge (支持 +/-)
+        auto t_start = QueryStats::now(); // [TIMER START]
         global_index->update_Aux(de, matched_edges);
+        auto t_end = QueryStats::now();   // [TIMER END]
+        QueryStats::add_duration(stats.time_update_aux_ns, t_start, t_end);
     }
 
     // 3. 第三步：执行查询
-    // 此时无论是插入还是删除，Global Index 的状态都包含了这条边，可以被搜索到
     mpz_t one_embedding_cnt;
     mpz_init(one_embedding_cnt);
     for (size_t i = 0; i < automorphism_edges_.size(); i++) {
         auto& edge_group = automorphism_edges_[i];
 
-        // 只处理 Label 匹配的组
         if (edge_group[0].elabel_ == de.edge_.elabel_) {
-            // 尝试基于当前数据边构建局部搜索环境
-            if (local_index->try_build_local(global_index, de.edge_, edge_group[0])) {
+            // --- 统计 try_build_local ---
+            auto t_build_start = QueryStats::now();
+            bool build_success = local_index->try_build_local(global_index, de.edge_, edge_group[0]);
+            auto t_build_end = QueryStats::now();
+            QueryStats::add_duration(stats.time_try_build_ns, t_build_start, t_build_end);
+            t_build_start = QueryStats::now();
+            local_index->aux.update(global_index->aux);
+            t_build_end = QueryStats::now();
+            QueryStats::add_duration(stats.time_local_aux_ns, t_build_start, t_build_end);
+            // ---------------------------
+
+            if (build_success) {
                 mpz_set_ui(one_embedding_cnt, 0);
 
-                // 执行回溯搜索
+                // 准备 Adapter
                 QueryAdapter adapter(local_index->aux);
-                QueryEngine::BSXEngine(global_index->aux.dnum,
-                                         global_index->aux.query_graph,
-                                         adapter.edge_matrix_ptr,
-                                         adapter.candidates_ptr,
-                                         adapter.candidates_count_ptr,
-                                         global_index->pruneCache->order,
-                                         output_limit, one_embedding_cnt, end_time);
 
-                // 利用同构性质，乘以组的大小
+                // --- 统计 Candidates 数量 ---
+                // 假设 candidates_count_ptr 是一个数组，长度为查询图的顶点数
+                // 如果您有特定的获取顶点数的方法，请在此处替换 global_index->aux.query_graph->getVerticesCount()
+                size_t q_v_num = global_index->aux.query_graph->getVerticesCount(); 
+                unsigned long long current_cands = 0;
+                for(size_t v_idx = 0; v_idx < q_v_num; ++v_idx) {
+                    current_cands += adapter.candidates_count_ptr[v_idx];
+                }
+                stats.total_candidates += current_cands;
+                stats.search_invocations++;
+                // ---------------------------
+
+                // --- 统计 BSXEngine ---
+                auto t_bsx_start = QueryStats::now();
+                QueryEngine::BSXEngine(global_index->aux.dnum,
+                                       global_index->aux.query_graph,
+                                       adapter.edge_matrix_ptr,
+                                       adapter.candidates_ptr,
+                                       adapter.candidates_count_ptr,
+                                       global_index->pruneCache->order,
+                                       output_limit, one_embedding_cnt, end_time);
+                auto t_bsx_end = QueryStats::now();
+                QueryStats::add_duration(stats.time_bsx_ns, t_bsx_start, t_bsx_end);
+                // ---------------------
+
+                // --- 统计 零结果 (Zero Results) ---
+                if (mpz_cmp_ui(one_embedding_cnt, 0) == 0) {
+                    stats.bsx_zero_count++;
+                }
+
                 mpz_mul_ui(one_embedding_cnt, one_embedding_cnt, edge_group.size());
                 mpz_add(embedding_cnt, embedding_cnt, one_embedding_cnt);
-                
+
                 if (TimeOp::getClockNan() >= end_time) break;
             }
         }
     }
     mpz_clear(one_embedding_cnt);
 
-    // 4. 第四步：如果是删除操作 (-)，在查询完成后更新 Global Index
-    // 之前索引里有这条边，查完了现在把它删掉
+    // 4. 第四步：如果是删除操作 (-)，更新 Global Index
     if (de.op_ == '-') {
+        auto t_start = QueryStats::now(); // [TIMER START]
         global_index->update_Aux(de, matched_edges);
+        auto t_end = QueryStats::now();   // [TIMER END]
+        QueryStats::add_duration(stats.time_update_aux_ns, t_start, t_end);
     }
 }

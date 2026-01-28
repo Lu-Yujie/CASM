@@ -1,6 +1,7 @@
 set(utils_SRC
-        graphoperations.cpp
-        CLI11.hpp)
+    graphoperations.cpp
+    CLI11.hpp
+    setOp.cpp
+)
 
-add_library(utils SHARED
-        ${utils_SRC})
+add_library(utils SHARED ${utils_SRC})

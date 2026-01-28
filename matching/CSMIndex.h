@@ -7,6 +7,7 @@
 // 第一次先指定一个顺序，从 candidates 最少到最多，然后反向一次
 //
 #include "graph/graph.h"
+#include <queue>
 using namespace std;
 
 struct Aux {
@@ -33,14 +34,14 @@ struct Aux {
 
 struct CSMPruneCache {
     VertexID* order = nullptr;
-    std::vector<bool> visited;
-    vector<const vector<VertexID>*> u_cans_nbrs;
-    vector<bool> results_buffer;
-    vector<ui> aux_cursors;
-    vector<ui> aux_queue;
+    vector<bool> visited;
+    queue<ui> bfs_q;
+    vector<ui> flag_array;
+    vector<ui> reset_buffer;
+    vector<VertexID> valid_cans_buffer;
 
     CSMPruneCache() {}
-    CSMPruneCache(ui max_cans, ui qnum);
+    CSMPruneCache(ui max_cans, ui qnum, ui dnum);
     ~CSMPruneCache() { delete[] order; }
 };
 
@@ -62,10 +63,9 @@ public:
     void update_Aux(Update de, vector<Edge>& matched_edges);
 
 private:
-    bool csm_prune(ui u, const CSMIndex* global);
+    bool propagate_forward(const CSMIndex* global, ui u, ui unbr);
     bool propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed);
     bool edge_quick_prune(const CSMIndex* global, Edge de, Edge qe);
-    inline void copy_block(ui* dst, const ui* src, ui len);
     ui ensure_candidate_global(ui u, ui v_can);
     void insert_edge_at_index(CSMEdges* old_edges, ui row_idx, ui v_nbr);
     void delete_edge_at_index(CSMEdges* old_edges, ui row_idx, ui v_nbr);

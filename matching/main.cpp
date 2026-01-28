@@ -89,19 +89,21 @@ int main(int argc, char** argv) {
     double preprocessing_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
     std::cout << "Scan streams..." << std::endl;
+    QueryStats stats;
     start = std::chrono::high_resolution_clock::now();
 
     ui processed_edges_cnt = 0;
     for (; processed_edges_cnt < update_cnt; processed_edges_cnt++) {
         auto& update_edge = updates[processed_edges_cnt];
         auto& embedding_cnt = embedding_cnts[processed_edges_cnt];
-        csmEngine->query(update_edge, output_limit, embedding_cnt, end_time);
+        csmEngine->query(update_edge, output_limit, embedding_cnt, end_time, stats);
         // gmp_printf("#%d Embeddings: %Zd, ", processed_edges_cnt, embedding_cnt);
         if (TimeOp::getClockNan() >= end_time) break;
     }
 
     end = std::chrono::high_resolution_clock::now();
     double enumeration_time_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    stats.print_report();
 
     delete csmEngine;
     delete query_graph;
