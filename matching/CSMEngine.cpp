@@ -1,6 +1,6 @@
 #include "CSMEngine.h"
 #include "utils/graphoperations.h"
-#include "EvaluateQuery.h"
+#include "QueryEngine.h"
 #include "timeOp.h"
 
 void CSMEngine::build_automorphism_edges(const Graph *query_graph) {
@@ -109,7 +109,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
 
                 // 执行回溯搜索
                 QueryAdapter adapter(local_index->aux);
-                EvaluateQuery::BSXEngine(global_index->aux.dnum,
+                QueryEngine::BSXEngine(global_index->aux.dnum,
                                          global_index->aux.query_graph,
                                          adapter.edge_matrix_ptr,
                                          adapter.candidates_ptr,

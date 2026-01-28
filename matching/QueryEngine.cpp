@@ -1,4 +1,4 @@
-#include "EvaluateQuery.h"
+#include "QueryEngine.h"
 #include "utils/bsx/IndepSet.h"
 #include "utils/bsx/nodeSim.h"
 #include "utils/SetOp.h"
@@ -8,294 +8,11 @@
 #include <sys/stat.h>
 #include <timeOp.h>
 
-void EvaluateQuery::generateBN(const Graph *query_graph, ui *order, ui *pivot, ui **&bn, ui *&bn_count) {
-    ui q_num = query_graph->getVerticesCount();
-    bn_count = new ui[q_num];
-    std::fill(bn_count, bn_count + q_num, 0);
-    bn = new ui *[q_num];
-    for (ui i = 0; i < q_num; ++i) {
-        bn[i] = new ui[q_num];
-    }
-
-    std::vector<bool> visited_vertices(q_num, false);
-    visited_vertices[order[0]] = true;
-    for (ui i = 1; i < q_num; ++i) {
-        VertexID vertex = order[i];
-
-        ui nbrs_cnt;
-        const ui *nbrs = query_graph->getVertexNeighbors(vertex, nbrs_cnt);
-        for (ui j = 0; j < nbrs_cnt; ++j) {
-            VertexID nbr = nbrs[j];
-
-            if (visited_vertices[nbr] && nbr != pivot[i]) {
-                bn[i][bn_count[i]++] = nbr;
-            }
-        }
-
-        visited_vertices[vertex] = true;
-    }
-}
-
-void
-EvaluateQuery::BS1Engine(const Graph *data_graph, const Graph *query_graph, Edges ***edge_matrix,
-                             ui **candidates, ui *candidates_count, ui *order, ui *pivot,
-                             size_t output_limit_num, mpz_t embedding_cnt, int64_t& time_limit) {
-    // Generate the bn.
-    ui **bn;
-    ui *bn_count;
-    generateBN(query_graph, order, pivot, bn, bn_count);
-
-    // Allocate the memory buffer.
-    ui *idx;
-    ui *idx_count;
-    ui *embedding;
-    ui *idx_embedding;
-    ui *temp_buffer;
-    ui **valid_candidate_idx;
-    bool *visited_vertices;
-    allocateBuffer(data_graph, query_graph, candidates_count, idx, idx_count, embedding, idx_embedding,
-                   temp_buffer, valid_candidate_idx, visited_vertices);
-    // Evaluate the query.
-    mpz_set_ui(embedding_cnt, 0);
-    ui cur_depth = 0;
-    ui max_depth = query_graph->getVerticesCount();
-    VertexID start_vertex = order[0];
-
-#ifdef ANALYZE_DUPLICATE
-    auto g_name = query_graph->g_name;
-    size_t last_slash_pos = g_name.find_last_of('/');
-    if (last_slash_pos != std::string::npos)
-        g_name = g_name.substr(last_slash_pos + 1);
-    size_t last_dot_pos = g_name.find_last_of('.');
-    if (last_dot_pos != std::string::npos)
-        g_name = g_name.substr(0, last_dot_pos);
-    g_name = "./" + g_name;
-    int status = mkdir(g_name.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-
-    if (status == 0) {
-        std::cout << g_name << ": Folder created successfully.\n";
-    } else {
-        std::cout << g_name << ": Failed to create folder.\n";
-        exit(-1);
-    }
-
-    std::vector<std::ofstream> out_files;
-    out_files.resize(max_depth);
-    for (ui i = 1; i < max_depth; i++) {
-        out_files[i-1].open(g_name + "/" + std::to_string(i-1) + ".txt");
-    }
-    memset(embedding, (ui)-1, sizeof(ui)*max_depth);
-    std::vector<std::stack<std::vector<ui>>> valid_cans;
-    for (ui i = 0; i < max_depth; i++) {
-        std::stack<std::vector<ui>> sv;
-        std::vector<ui> vec;
-        vec.insert(vec.end(), candidates[i], candidates[i]+candidates_count[i]);
-        sv.push(std::move(vec));
-        valid_cans.emplace_back(std::move(sv));
-    }
-#endif
-
-    idx[cur_depth] = 0;
-    idx_count[cur_depth] = candidates_count[start_vertex];
-
-    for (ui i = 0; i < idx_count[cur_depth]; ++i) {
-        valid_candidate_idx[cur_depth][i] = i;
-    }
-
-    while (true) {
-        while (idx[cur_depth] < idx_count[cur_depth]) {
-            if (TimeOp::getClockNan() >= time_limit) {
-                goto EXIT;
-            }
-            ui valid_idx = valid_candidate_idx[cur_depth][idx[cur_depth]];
-            VertexID u = order[cur_depth];
-            VertexID v = candidates[u][valid_idx];
-
-            embedding[u] = v;
-            idx_embedding[u] = valid_idx;
-            visited_vertices[v] = true;
-            idx[cur_depth] += 1;
-
-            if (cur_depth == max_depth - 1) {
-                mpz_add_ui(embedding_cnt, embedding_cnt, 1);
-                visited_vertices[v] = false;
-                if (output_limit_num != (size_t)-1 && mpz_cmp_ui(embedding_cnt, output_limit_num) > 0) {
-                    goto EXIT;
-                }
-            } else {
-                cur_depth += 1;
-                idx[cur_depth] = 0;
-                generateValidCandidateIndex(data_graph, cur_depth, embedding, idx_embedding, idx_count,
-                                            valid_candidate_idx, edge_matrix, visited_vertices, bn,
-                                            bn_count, order, pivot, candidates, query_graph);
-#ifdef ANALYZE_DUPLICATE
-                // compute valid_cans of all u's connected to u
-                ui unbrs_cnt = 0;
-                auto unbrs = query_graph->getVertexNeighbors(u, unbrs_cnt);
-                for (ui i = 0; i < unbrs_cnt; i++) {
-                    auto unbr = unbrs[i];
-                    if (embedding[unbr] != (ui)-1) {  // if not matched, compute valid_cans
-                        // first, get all neighbors of v on dataGraph
-                        ui vnbrs_cnt = 0;
-                        auto vnbrs = data_graph->getVertexNeighbors(v, vnbrs_cnt);
-                        // and then intersected with valid_cans[unbr] & push
-                        auto res = SetOp::intersectTwo(valid_cans[unbr].top(), vnbrs, vnbrs_cnt);
-                        valid_cans[unbr].push(std::move(res));
-                    }
-                }
-                for (ui i = cur_depth; i < max_depth; i++) {
-                    auto cur_u = order[i];
-                    for (auto& can : valid_cans[i].top()) {
-                        out_files[cur_depth-1] << can << " ";
-                    }
-                    out_files[cur_depth-1] << std::endl;
-                }
-                out_files[cur_depth-1] << "------" << std::endl;
-#endif
-            }
-        }
-
-        // backtrack
-        cur_depth -= 1;
-        if (cur_depth == (ui)-1)
-            break;
-        else
-            visited_vertices[embedding[order[cur_depth]]] = false;
-#ifdef ANALYZE_DUPLICATE
-        // if (idx_count[cur_depth+1] == 0) continue;
-        auto last_u = order[cur_depth + 1];
-        embedding[last_u] = (ui)-1;
-        auto u = order[cur_depth];
-        auto v = embedding[u];
-        // restore of neighbors of u valid_cans
-        ui unbrs_cnt = 0;
-        auto unbrs = query_graph->getVertexNeighbors(u, unbrs_cnt);
-        for (ui i = 0; i < unbrs_cnt; i++) {
-            auto unbr = unbrs[i];
-            if (embedding[unbr] != (ui)-1) {
-                valid_cans[unbr].pop();
-            }
-        }
-#endif
-    }
-
-
-    // Release the buffer.
-    EXIT:
-    releaseBuffer(max_depth, idx, idx_count, embedding, idx_embedding, temp_buffer, valid_candidate_idx,
-                  visited_vertices,
-                  bn, bn_count);
-#ifdef ANALYZE_DUPLICATE
-    for (ui i = 1; i < max_depth; i++) { 
-        out_files[i-1].close();
-    }
-#endif
-
-    return;
-}
-
-void
-EvaluateQuery::allocateBuffer(const Graph *data_graph, const Graph *query_graph, ui *candidates_count, ui *&idx,
-                              ui *&idx_count, ui *&embedding, ui *&idx_embedding, ui *&temp_buffer,
-                              ui **&valid_candidate_idx, bool *&visited_vertices) {
-    ui q_num = query_graph->getVerticesCount();
-    ui d_num = data_graph->getVerticesCount();
-    ui max_candidates_num = candidates_count[0];
-
-    for (ui i = 1; i < q_num; ++i) {
-        VertexID cur_vertex = i;
-        ui cur_candidate_num = candidates_count[cur_vertex];
-
-        if (cur_candidate_num > max_candidates_num) {
-            max_candidates_num = cur_candidate_num;
-        }
-    }
-
-    idx = new ui[q_num];
-    idx_count = new ui[q_num];
-    embedding = new ui[q_num];
-    idx_embedding = new ui[q_num];
-    visited_vertices = new bool[d_num];
-    temp_buffer = new ui[max_candidates_num];
-    valid_candidate_idx = new ui *[q_num];
-    for (ui i = 0; i < q_num; ++i) {
-        valid_candidate_idx[i] = new ui[max_candidates_num];
-    }
-
-    std::fill(visited_vertices, visited_vertices + d_num, false);
-}
-
-void EvaluateQuery::generateValidCandidateIndex(const Graph *data_graph, ui depth, ui *embedding, ui *idx_embedding,
-                                                ui *idx_count, ui **valid_candidate_index, Edges ***edge_matrix,
-                                                bool *visited_vertices, ui **bn, ui *bn_cnt, ui *order, ui *pivot,
-                                                ui **candidates, const Graph *query_graph) {
-    VertexID u = order[depth];
-    VertexID pivot_vertex = pivot[depth];
-    ui idx_id = idx_embedding[pivot_vertex];
-    Edges &edges = *edge_matrix[pivot_vertex][u];
-    ui count = edges.offset_[idx_id + 1] - edges.offset_[idx_id];
-    ui *candidate_idx = edges.edge_ + edges.offset_[idx_id];
-
-    ui valid_candidate_index_count = 0;
-
-    if (bn_cnt[depth] == 0) {
-        for (ui i = 0; i < count; ++i) {
-            ui temp_idx = candidate_idx[i];
-            VertexID temp_v = candidates[u][temp_idx];
-
-            if (!visited_vertices[temp_v])
-                valid_candidate_index[depth][valid_candidate_index_count++] = temp_idx;
-        }
-    } else {
-        for (ui i = 0; i < count; ++i) {
-            ui temp_idx = candidate_idx[i];
-            VertexID temp_v = candidates[u][temp_idx];
-
-            if (!visited_vertices[temp_v]) {
-                bool valid = true;
-
-                for (ui j = 0; j < bn_cnt[depth]; ++j) {
-                    VertexID u_bn = bn[depth][j];
-                    VertexID u_bn_v = embedding[u_bn];
-                    if (!data_graph->checkEdgeExistence(temp_v, u_bn_v)) {
-                        valid = false;
-                        break;
-                    }
-                }
-
-                if (valid)
-                    valid_candidate_index[depth][valid_candidate_index_count++] = temp_idx;
-            }
-        }
-    }
-
-    idx_count[depth] = valid_candidate_index_count;
-}
-
-void EvaluateQuery::releaseBuffer(ui q_num, ui *idx, ui *idx_count, ui *embedding, ui *idx_embedding,
-                                  ui *temp_buffer, ui **valid_candidate_idx, bool *visited_vertices, ui **bn,
-                                  ui *bn_count) {
-    delete[] idx;
-    delete[] idx_count;
-    delete[] embedding;
-    delete[] idx_embedding;
-    delete[] visited_vertices;
-    delete[] bn_count;
-    delete[] temp_buffer;
-    for (ui i = 0; i < q_num; ++i) {
-        delete[] valid_candidate_idx[i];
-        delete[] bn[i];
-    }
-
-    delete[] valid_candidate_idx;
-    delete[] bn;
-}
-
 /**
  * use bsx method
 */
 void
-EvaluateQuery::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
+QueryEngine::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
                           ui **candidates, ui *candidates_count, ui *order,
                           size_t output_limit_num, mpz_t embedding_cnt, int64_t& time_limit) {
     ui q_num = query_graph->getVerticesCount();
@@ -460,7 +177,7 @@ EvaluateQuery::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matri
  * compute static order by max indep cover, dynamic order computed along matching
 */
 void
-EvaluateQuery::bsxMaxCoverOrder(const Graph *graph, ui *&order, ui& num_cover, ui *candidates_count) {
+QueryEngine::bsxMaxCoverOrder(const Graph *graph, ui *&order, ui& num_cover, ui *candidates_count) {
     auto q_num = graph->getVerticesCount();
     if (order == nullptr) {
         order = new ui[q_num];
@@ -511,7 +228,7 @@ EvaluateQuery::bsxMaxCoverOrder(const Graph *graph, ui *&order, ui& num_cover, u
  * process oneCansV from refinement
 */
 void
-EvaluateQuery::bsxDeRefine(BSXIndex& index) {
+QueryEngine::bsxDeRefine(BSXIndex& index) {
     auto q_num = index.q_graph_->getVerticesCount();
     bool* nbr_updated = new bool[q_num];
     std::copy(index.visited_u, index.visited_u+q_num, nbr_updated);
@@ -572,7 +289,7 @@ EvaluateQuery::bsxDeRefine(BSXIndex& index) {
  * 2.depth >= num_cover: #cans!=1, #cans(asc), #degree(des), #id(arbitrary)
 */
 VertexID
-EvaluateQuery::bsxGenNxtU(BSXIndex& index, VertexID* order, ui depth, ui num_cover) {
+QueryEngine::bsxGenNxtU(BSXIndex& index, VertexID* order, ui depth, ui num_cover) {
     auto& valid_cnt = index.valid_cnt_;
     auto& graph = index.q_graph_;
     if (depth < num_cover) {
@@ -604,14 +321,14 @@ EvaluateQuery::bsxGenNxtU(BSXIndex& index, VertexID* order, ui depth, ui num_cov
 
 // check termination (each no-indep only one cans)
 bool
-EvaluateQuery::bsxCheckTermination(ui num, VertexID* indep, std::stack<ui>*valid_cnt) {
+QueryEngine::bsxCheckTermination(ui num, VertexID* indep, std::stack<ui>*valid_cnt) {
     while (num) if (valid_cnt[indep[--num]].top() != 1) return false;
     return true;
 }
 
 // compute valid_cans for all indep, detect conflict
 bool
-EvaluateQuery::bsxGenIndepValidCans(ui indep_num, const VertexID* indep, BSXIndex& index, std::vector<std::vector<VertexID>>& cans) {
+QueryEngine::bsxGenIndepValidCans(ui indep_num, const VertexID* indep, BSXIndex& index, std::vector<std::vector<VertexID>>& cans) {
     const VertexID** uu_nbrs = new const VertexID*[index.q_graph_->getVerticesCount()];
     ui* uu_nbrs_cnt = new  ui[index.q_graph_->getVerticesCount()];
     for (ui i = 0; i < indep_num; i++) {
@@ -638,7 +355,7 @@ EvaluateQuery::bsxGenIndepValidCans(ui indep_num, const VertexID* indep, BSXInde
 
 // generate equivalent batches
 void
-EvaluateQuery::bsxComEqBatch(BSXIndex& index, VertexID u) {
+QueryEngine::bsxComEqBatch(BSXIndex& index, VertexID u) {
     auto& num_node = index.valid_cnt_[u].top();
     auto& batch_nodes = index.batch_info[u].nodes_.top();
     auto& offset = index.batch_info[u].offset_.top();
@@ -677,7 +394,7 @@ EvaluateQuery::bsxComEqBatch(BSXIndex& index, VertexID u) {
 
 // compute equ-batch on idxs, idxs indicate which nodes participate batch computation
 void
-EvaluateQuery::bsxComEqBatchDirect(BSXIndex& index, VertexID u, std::vector<ui>& idxs) {
+QueryEngine::bsxComEqBatchDirect(BSXIndex& index, VertexID u, std::vector<ui>& idxs) {
     auto& nodes = index.valid_cans_[u].top();
     auto num_idxs = idxs.size();
     auto& batches = index.batch_info[u].nodes_.top();
@@ -750,7 +467,7 @@ EvaluateQuery::bsxComEqBatchDirect(BSXIndex& index, VertexID u, std::vector<ui>&
 // equ-batch refine, just process first v of valid_cans, because of they are equ
 // if success, return -1, else return failed uId
 ui
-EvaluateQuery::bsxRefine(BSXIndex& index, VertexID u) {
+QueryEngine::bsxRefine(BSXIndex& index, VertexID u) {
     ui q_num = index.q_graph_->getVerticesCount();
     auto v = index.valid_cans_[u].top()[0];
     bool* influenced = new bool[q_num];
@@ -832,7 +549,7 @@ EvaluateQuery::bsxRefine(BSXIndex& index, VertexID u) {
 }
 
 void
-EvaluateQuery::bsxGenResult(ui indep_num, const VertexID* indep, BSXIndex& index) {
+QueryEngine::bsxGenResult(ui indep_num, const VertexID* indep, BSXIndex& index) {
     auto& visited_v = index.visited_v;
     auto& indep_con_cnt = index.indep_con_cnt_;
     auto& sep_flag = index.sep_flag_;  // indexed by idx
@@ -908,7 +625,7 @@ EvaluateQuery::bsxGenResult(ui indep_num, const VertexID* indep, BSXIndex& index
 
 // according to indep_con_cnt info, seperate v_cans into two parts, return the #first_part(true)
 ui
-EvaluateQuery::bsxSepDiff(std::vector<VertexID> &v_cans, const ui *indep_con_cnt, int forward_idx, int backward_idx) {
+QueryEngine::bsxSepDiff(std::vector<VertexID> &v_cans, const ui *indep_con_cnt, int forward_idx, int backward_idx) {
     if (backward_idx-forward_idx == 0) return indep_con_cnt[v_cans[forward_idx]] != 0;
     ui first_con_cnt = indep_con_cnt[v_cans[forward_idx]];
     VertexID first_idx = v_cans[forward_idx];
@@ -927,7 +644,7 @@ EvaluateQuery::bsxSepDiff(std::vector<VertexID> &v_cans, const ui *indep_con_cnt
 
 // TODO: opt to three parts
 void  // 4 parts: up-down,up-x,x-down,x-x; down&x 2 parts so far
-EvaluateQuery::bsxEnumerate4Parts(ui **&sep_flags, const VertexID* nodes, ui nodes_num,
+QueryEngine::bsxEnumerate4Parts(ui **&sep_flags, const VertexID* nodes, ui nodes_num,
                                    std::vector<std::vector<VertexID>>& cans, bool *&visited_v,
                                    mpz_t cur_cnt) {
     ui depth = 0;

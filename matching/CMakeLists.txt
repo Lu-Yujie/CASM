@@ -1,5 +1,5 @@
 set(SUBGRAPH_MATCHING_FILE_LIST
-    EvaluateQuery.cpp
+    QueryEngine.cpp
     BuildAux.cpp
     CSMEngine.cpp
     CSMIndex.cpp
