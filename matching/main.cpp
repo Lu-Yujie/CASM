@@ -40,12 +40,11 @@ int main(int argc, char** argv) {
     std::cout << "Load graphs..." << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
 
-    Graph* query_graph = new Graph(true);
+    Graph* query_graph = new Graph();
     query_graph->loadGraphFromFile(query_file);
     query_graph->g_name = query_file;
-    query_graph->buildCoreTable();
 
-    Graph* data_graph = new Graph(true);
+    Graph* data_graph = new Graph();
     data_graph->loadGraphFromFile(data_file);
 
     std::vector<Update> updates;
@@ -97,7 +96,7 @@ int main(int argc, char** argv) {
         auto& update_edge = updates[processed_edges_cnt];
         auto& embedding_cnt = embedding_cnts[processed_edges_cnt];
         csmEngine->query(update_edge, output_limit, embedding_cnt, end_time);
-        gmp_printf("#%d Embeddings: %Zd, ", processed_edges_cnt, embedding_cnt);
+        // gmp_printf("#%d Embeddings: %Zd, ", processed_edges_cnt, embedding_cnt);
         if (TimeOp::getClockNan() >= end_time) break;
     }
 

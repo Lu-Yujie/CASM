@@ -327,7 +327,7 @@ void setDifference(ui* A, ui& A_size, vector<ui>&B) {
 }
 
 static // A = A∩B
-void intersectAndUpdate(vector<ui>&A, vector<ui>&B) {
+void intersectAndUpdate(vector<ui>&A, const vector<ui>&B) {
     ui indexA = 0;
     ui indexB = 0;
     ui insertPos = 0;
@@ -438,7 +438,6 @@ ui multi_overlap_no_alloc(const ui** candidates, ui* candidate_sizes, ui num_can
                           bool* results_buffer, 
                           ui* aux_cursors, 
                           ui* aux_queue) {
-    // 初始化状态
     memset(results_buffer, 0, num_candidates * sizeof(bool));
     memset(aux_cursors, 0, num_candidates * sizeof(ui));
     
@@ -460,6 +459,73 @@ ui multi_overlap_no_alloc(const ui** candidates, ui* candidate_sizes, ui num_can
             ui id = aux_queue[i];
             const ui* curr_arr = candidates[id];
             ui size = candidate_sizes[id];
+            ui& ptr = aux_cursors[id];
+
+            while (ptr < size && curr_arr[ptr] < target_val) {
+                ptr++;
+            }
+
+            if (ptr == size) {
+                swap(aux_queue[i], aux_queue[exhausted_count]);
+                exhausted_count++;
+                i++;
+            } else if (curr_arr[ptr] == target_val) {
+                results_buffer[id] = true;
+                active_end--;
+                swap(aux_queue[i], aux_queue[active_end]);
+                found_count++;
+            } else {
+                i++;
+            }
+        }
+        target_idx++;
+    }
+    return found_count;
+}
+
+/**
+ * 高性能版：适配 std::vector 结构的 multi_overlap
+ * @param candidates      [输入] 候选点的邻居列表集合 (u_cans_nbrs)
+ * @param num_candidates  [输入] 当前有效的候选点数量 (valid_cans_cnt)
+ * @param target          [输入] 目标集合 (unbr_candidates)
+ * @param results_buffer  [输出] 结果 buffer (vector<bool>)
+ * @param aux_cursors     [辅助] 游标 buffer
+ * @param aux_queue       [辅助] 队列 buffer
+ * @return found_count    存在交集的数量
+ */
+static
+ui multi_overlap_no_alloc(const vector<const vector<VertexID>*>& candidates, 
+                          ui num_candidates, 
+                          const vector<VertexID>& target,
+                          vector<bool>& results_buffer, 
+                          vector<ui>& aux_cursors, 
+                          vector<ui>& aux_queue) {
+    std::fill(results_buffer.begin(), results_buffer.begin() + num_candidates, false);
+    std::fill(aux_cursors.begin(), aux_cursors.begin() + num_candidates, 0);
+    for (ui k = 0; k < num_candidates; ++k) {
+        aux_queue[k] = k;
+    }
+
+    ui found_count = 0;
+    ui exhausted_count = 0;
+    ui target_idx = 0;
+
+    const VertexID* target_data = target.data();
+    ui target_size = target.size();
+
+    while ((found_count + exhausted_count < num_candidates) && (target_idx < target_size)) {
+        ui target_val = target_data[target_idx];
+        
+        size_t i = exhausted_count;
+        size_t active_end = num_candidates - found_count;
+
+        while (i < active_end) {
+            ui id = aux_queue[i];
+
+            const vector<VertexID>* vec_ptr = candidates[id];
+            const VertexID* curr_arr = vec_ptr->data();
+            ui size = vec_ptr->size(); 
+
             ui& ptr = aux_cursors[id];
 
             while (ptr < size && curr_arr[ptr] < target_val) {

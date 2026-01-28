@@ -108,9 +108,6 @@ namespace NodeSim {
     }
     // compute landmarks
     vector<ui> landmarks = move(chooseLandmark(nbrs_cnt, num_node));
-    cout << "landmarks: ";
-    for (auto&tmp_ele:landmarks) cout << tmp_ele << ", ";
-    cout << endl;
     // compute the lsh value
     vector<int64_t> lsh_values;
     lsh_values.reserve(num_node);

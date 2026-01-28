@@ -16,8 +16,6 @@ class Graph {
 public:
     std::string g_name;
 private:
-    bool enable_vlabel_offset_;
-
     ui vertices_count_;
     ui edges_count_;
     ui vlabels_count_;
@@ -29,9 +27,6 @@ private:
     LabelID* vlabels_;  // v->label
     ui* label2v_offsets_;
     VertexID* label2v_;  // label->v
-
-    int* core_table_;
-    ui core_length_;
 
     std::unordered_map<LabelID, ui> vlabels_frequency_;
 
@@ -46,22 +41,18 @@ private:
     void BuildVLabelOffset();
 
 public:
-    Graph(const bool enable_label_offset) {
-        enable_vlabel_offset_ = enable_label_offset;
-
+    Graph() {
         vertices_count_ = 0;
         edges_count_ = 0;
         vlabels_count_ = 0;
         max_degree_ = 0;
         max_vlabel_frequency_ = 0;
-        core_length_ = 0;
 
         offsets_ = nullptr;
         neighbors_ = nullptr;
         vlabels_ = nullptr;
         label2v_offsets_ = nullptr;
         label2v_ = nullptr;
-        core_table_ = nullptr;
         vlabels_frequency_.clear();
         vlabels_offsets_ = nullptr;
         nlf_ = nullptr;
@@ -73,7 +64,6 @@ public:
         delete[] vlabels_;
         delete[] label2v_offsets_;
         delete[] label2v_;
-        delete[] core_table_;
         delete[] vlabels_offsets_;
         delete[] nlf_;
     }
@@ -111,13 +101,6 @@ public:
         return vlabels_frequency_.find(label) == vlabels_frequency_.end() ? 0 : vlabels_frequency_.at(label);
     }
 
-    const ui getCoreValue(const VertexID id) const {
-        return core_table_[id];
-    }
-
-    const ui get2CoreSize() const {
-        return core_length_;
-    }
     const LabelID getVertexLabel(const VertexID id) const {
         return vlabels_[id];
     }
@@ -190,8 +173,6 @@ public:
 
         return false;
     }
-
-    void buildCoreTable();
 };
 
 

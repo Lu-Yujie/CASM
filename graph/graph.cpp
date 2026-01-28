@@ -145,10 +145,8 @@ void Graph::loadGraphFromFile(const std::string &file_path) {
     }
 
     BuildReverseIndex();
+    BuildNLF();
 
-    if (enable_vlabel_offset_) {
-        BuildNLF();
-    }
 }
 
 void Graph::load_updates(const std::string& file_path, std::vector<Update>& stream) {
@@ -192,8 +190,8 @@ void Graph::load_updates(const std::string& file_path, std::vector<Update>& stre
                 update.op_ = op_str == "e" ? '+' : '-';
                 uint32_t first, second;
                 ss >> first >> second;
-                update.edge_.vertices_[0] = first;
-                update.edge_.vertices_[1] = second;
+                update.edge_.src_ = first;
+                update.edge_.dst_ = second;
                 update.edge_.elabel_.src_label_ = first < vertex_num
                                                   ? this->getVertexLabel(first)
                                                   : new_vertex_label[first];
@@ -215,15 +213,4 @@ void Graph::load_updates(const std::string& file_path, std::vector<Update>& stre
 void Graph::printGraphMetaData() {
     std::cout << "|V|: " << vertices_count_ << ", |E|: " << edges_count_ << ", |\u03A3|: " << vlabels_count_ << std::endl;
     std::cout << "Max Degree: " << max_degree_ << ", Max Label Frequency: " << max_vlabel_frequency_ << std::endl;
-}
-
-void Graph::buildCoreTable() {
-    core_table_ = new int[vertices_count_];
-    GraphOperations::getKCore(this, core_table_);
-
-    for (ui i = 0; i < vertices_count_; ++i) {
-        if (core_table_[i] > 1) {
-            core_length_ += 1;
-        }
-    }
 }

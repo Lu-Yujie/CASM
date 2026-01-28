@@ -68,53 +68,10 @@ void CSMEngine::build_edges_mapping(const Graph *query_graph) {
 void CSMEngine::init(const Graph *data_graph, const Graph *query_graph) {
     global_index = new CSMIndex;
     local_index = new CSMIndex;
-    global_index->build_A(data_graph, query_graph);
+    global_index->build_Aux(data_graph, query_graph);
+    local_index->aux.init(query_graph);
     build_automorphism_edges(query_graph);
     build_edges_mapping(query_graph);
-    auto qnum = global_index->query_graph->getVerticesCount();
-    auto& local_cans = local_index->cans;
-    auto& local_cans_cnt = local_index->cans_cnt;
-    if (local_cans == nullptr) {
-        local_cans = new ui*[qnum];
-        local_cans_cnt = new ui[qnum];
-        local_max_cans = new ui[qnum];
-    }
-    auto& max_cans = global_index->max_cans;
-    for (ui i = 0; i < qnum; i++) {
-        local_cans[i] = new ui[max_cans];
-        local_max_cans[i] = max_cans;
-    }
-}
-
-bool CSMEngine::try_build_local(Edge de, Edge qe) {
-    ui qnum = global_index->query_graph->getVerticesCount();
-    auto& local_cans = local_index->cans;
-    auto& local_cans_cnt = local_index->cans_cnt;
-    auto& global_cans = global_index->cans;
-    auto& global_cans_cnt = global_index->cans_cnt;
-    auto& d_src = de.src();
-    auto& d_dst = de.dst();
-    auto& q_src = qe.src();
-    auto& q_dst = qe.dst();
-    // copy a new candidates
-    for (ui i = 0; i < qnum; i++) {
-        if (i == q_src) {
-            local_cans[q_src][0] = d_src;
-            local_cans_cnt[q_src] = 1;
-        } else if (i == q_dst) {
-            local_cans[q_dst][0] = d_dst;
-            local_cans_cnt[q_dst] = 1;
-        } else {
-            if (local_max_cans[i] < global_cans_cnt[i]) {
-                local_max_cans[i] = global_cans_cnt[i];
-                delete[] local_cans[i];
-                local_cans[i] = new ui[local_max_cans[i]];
-            }
-            std::copy(global_cans[i], global_cans[i]+global_cans_cnt[i], local_cans[i]);
-            local_cans_cnt[i] = global_cans_cnt[i];
-        }
-    }
-    return local_index->construct_local(global_index);
 }
 
 void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64_t& end_time) {
@@ -134,7 +91,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
     // 这样 try_build_local 和 BSXEngine 才能在索引中“看到”这条新边
     if (de.op_ == '+') {
         // 注意：这里调用的是上一轮修复后的 update_edge (支持 +/-)
-        global_index->update_A(de, matched_edges);
+        global_index->update_Aux(de, matched_edges);
     }
 
     // 3. 第三步：执行查询
@@ -147,13 +104,18 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
         // 只处理 Label 匹配的组
         if (edge_group[0].elabel_ == de.edge_.elabel_) {
             // 尝试基于当前数据边构建局部搜索环境
-            if (try_build_local(de.edge_, edge_group[0])) {
+            if (local_index->try_build_local(global_index, de.edge_, edge_group[0])) {
                 mpz_set_ui(one_embedding_cnt, 0);
 
                 // 执行回溯搜索
-                EvaluateQuery::BSXEngine(global_index->dnum, global_index->query_graph,
-                                         local_index->edge_matrix, local_index->cans, local_index->cans_cnt,
-                                         global_index->pruneCache->order, output_limit, one_embedding_cnt, end_time);
+                QueryAdapter adapter(local_index->aux);
+                EvaluateQuery::BSXEngine(global_index->aux.dnum,
+                                         global_index->aux.query_graph,
+                                         adapter.edge_matrix_ptr,
+                                         adapter.candidates_ptr,
+                                         adapter.candidates_count_ptr,
+                                         global_index->pruneCache->order,
+                                         output_limit, one_embedding_cnt, end_time);
 
                 // 利用同构性质，乘以组的大小
                 mpz_mul_ui(one_embedding_cnt, one_embedding_cnt, edge_group.size());
@@ -168,6 +130,6 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
     // 4. 第四步：如果是删除操作 (-)，在查询完成后更新 Global Index
     // 之前索引里有这条边，查完了现在把它删掉
     if (de.op_ == '-') {
-        global_index->update_A(de, matched_edges);
+        global_index->update_Aux(de, matched_edges);
     }
 }

@@ -9,69 +9,66 @@
 #include "graph/graph.h"
 using namespace std;
 
-class CSMPruneCache {
-public:
+struct Aux {
+    CSMEdges*** data = nullptr;
+    vector<vector<VertexID>> cans;
+    vector<VertexID> empty;
+    const Graph* query_graph = nullptr;
+    ui dnum, qnum;
+    Aux() {}
+    ~Aux() {
+        if (data != nullptr) {
+            for (ui i = 0; i < qnum; i++) {
+                for (ui j = 0; j < qnum; j++) { if (data[i][j]) delete data[i][j];}
+                delete[] data[i];
+            }
+            delete[] data;
+        }
+    }
+    void init(const Graph* data_graph, const Graph* query_graph);
+    void init(const Graph* query_graph);
+    void update(const Aux& global);
+    const vector<VertexID>& getNeighbors(VertexID u_1, VertexID u_2, VertexID v) const;
+};
+
+struct CSMPruneCache {
     VertexID* order = nullptr;
-    const ui** u_cans_nbrs = nullptr;
-    ui* u_cans_nbrs_cnt = nullptr;
-    bool* results_buffer = nullptr;
-    ui* aux_cursors = nullptr;
-    ui* aux_queue = nullptr;
-    ui qnum = 0;
-    ui max_cans = 0;
+    std::vector<bool> visited;
+    vector<const vector<VertexID>*> u_cans_nbrs;
+    vector<bool> results_buffer;
+    vector<ui> aux_cursors;
+    vector<ui> aux_queue;
 
     CSMPruneCache() {}
-    CSMPruneCache(ui max_cans, ui qnum) { update(max_cans, qnum); }
-    void update(ui new_max_cans, ui new_qnum);
-    ~CSMPruneCache();
+    CSMPruneCache(ui max_cans, ui qnum);
+    ~CSMPruneCache() { delete[] order; }
 };
 
 class CSMIndex {
 private:
-    ui ** cans = nullptr;
-    ui * cans_cnt = nullptr;
-    const Graph* query_graph = nullptr;
-    ui dnum = 0;
-    ui d_edge_num = 0;
-    ui max_cans = 0;
-    Edges ***edge_matrix = nullptr;
+    Aux aux;
     static CSMPruneCache* pruneCache;
     friend class CSMEngine;
 public:
     CSMIndex() {}
     ~CSMIndex() {
-        for (ui i = 0; i < query_graph->getVerticesCount(); ++i) {
-            delete[] cans[i];
-        }
-        delete[] cans;
-        delete[] cans_cnt;
         if (pruneCache != nullptr) {
             delete pruneCache;
             pruneCache = nullptr;
         }
-        if (edge_matrix != nullptr) {
-            for (ui i = 0; i < query_graph->getVerticesCount(); ++i) {
-                for (ui j = 0; j < query_graph->getVerticesCount(); ++j) {
-                    delete edge_matrix[i][j];
-                }
-                delete[] edge_matrix[i];
-            }
-            delete[] edge_matrix;
-        }
     }
-    bool construct_local(CSMIndex* global);
-    void build_A(const Graph *data_graph, const Graph *query_graph);
-    void update_A(Update de, vector<Edge>& matched_edges);
+    bool try_build_local(const CSMIndex* global, Edge de, Edge qe);
+    void build_Aux(const Graph *data_graph, const Graph *query_graph);
+    void update_Aux(Update de, vector<Edge>& matched_edges);
 
 private:
-    const VertexID* getNeighbors(VertexID u_1, VertexID u_2, VertexID v, ui& nbrs_cnt);
-    bool csmPrune(ui u, CSMIndex* global);
-    void buildCSMEdgeMatrix(CSMIndex* global);
+    bool csm_prune(ui u, const CSMIndex* global);
+    bool propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed);
+    bool edge_quick_prune(const CSMIndex* global, Edge de, Edge qe);
     inline void copy_block(ui* dst, const ui* src, ui len);
-    Edges* insert_blank_row(Edges* old_edges, ui insert_idx);
-    Edges* insert_edge_at_index(Edges* old_edges, ui row_idx, ui v_nbr);
     ui ensure_candidate_global(ui u, ui v_can);
-    Edges* delete_edge_at_index(Edges* old_edges, ui row_idx, ui v_nbr);
+    void insert_edge_at_index(CSMEdges* old_edges, ui row_idx, ui v_nbr);
+    void delete_edge_at_index(CSMEdges* old_edges, ui row_idx, ui v_nbr);
     ui find_candidate_index(ui u, ui v_can);
 };
 
