@@ -7,8 +7,24 @@
 // 第一次先指定一个顺序，从 candidates 最少到最多，然后反向一次
 //
 #include "graph/graph.h"
-#include <queue>
+#include "utils/fastQueue.h"
 using namespace std;
+
+struct CSMPruneCache {
+    VertexID* order = nullptr;
+    FastCircularQueue<ui> bfs_q;
+    vector<ui> flag_array;
+    vector<ui> reset_buffer;
+    uint64_t* visited_bitmask = nullptr;
+    uint64_t all_visited;
+
+    CSMPruneCache() {}
+    CSMPruneCache(ui max_cans, ui qnum, ui dnum);
+    ~CSMPruneCache() {
+        delete[] order;
+        delete[] visited_bitmask;
+    }
+};
 
 struct Aux {
     CSMEdges*** data = nullptr;
@@ -26,23 +42,10 @@ struct Aux {
             delete[] data;
         }
     }
-    void init(const Graph* data_graph, const Graph* query_graph);
-    void init(const Graph* query_graph);
-    void update(const Aux& global);
+    void init(const Graph* query_graph, ui max_cans);
+    void buildData(const Graph* data_graph, const Graph* query_graph, CSMPruneCache* pruneCache);
+    void updateData(const Aux& global, CSMPruneCache* pruneCache);
     const vector<VertexID>& getNeighbors(VertexID u_1, VertexID u_2, VertexID v) const;
-};
-
-struct CSMPruneCache {
-    VertexID* order = nullptr;
-    vector<bool> visited;
-    queue<ui> bfs_q;
-    vector<ui> flag_array;
-    vector<ui> reset_buffer;
-    vector<VertexID> valid_cans_buffer;
-
-    CSMPruneCache() {}
-    CSMPruneCache(ui max_cans, ui qnum, ui dnum);
-    ~CSMPruneCache() { delete[] order; }
 };
 
 class CSMIndex {
@@ -70,6 +73,8 @@ private:
     void insert_edge_at_index(CSMEdges* old_edges, ui row_idx, ui v_nbr);
     void delete_edge_at_index(CSMEdges* old_edges, ui row_idx, ui v_nbr);
     ui find_candidate_index(ui u, ui v_can);
+    inline void set_bit(uint64_t& mask, ui idx) { mask |= (1ULL << idx); }
+    inline bool get_bit(uint64_t mask, ui idx) { return (mask >> idx) & 1ULL; }
 };
 
 #endif

@@ -1,5 +1,6 @@
 #include "BuildAux.h"
 #include <algorithm>
+#include <numeric>
 using namespace std;
 
 template <typename CallbackFunc>
@@ -7,53 +8,45 @@ void buildAuxImpl(ui dnum,
                   CallbackFunc get_neighbors,
                   const Graph *query_graph, 
                   vector<vector<VertexID>>& cans,
-                  CSMEdges ***edge_matrix) {
-
+                  CSMEdges ***edge_matrix,
+                  vector<ui>& flag,
+                  vector<ui>& updated_flag,
+                  uint64_t* visited) {
     ui q_num = query_graph->getVerticesCount();
-    ui* flag = new ui[dnum];
-    ui* updated_flag = new ui[dnum];
-    std::fill(flag, flag + dnum, 0);
+    std::memset(visited, 0, sizeof(uint64_t) * 64);
 
-    for (ui i = 0; i < q_num; ++i) {
-        for (ui j = 0; j < q_num; ++j) {
-            edge_matrix[i][j] = nullptr;
+    // 用于保留 capacity 的深度清理, 嵌套 vector 做外层resize可能会释放内层 vector 的内存
+    auto reset_edge_vec = [](std::vector<std::vector<VertexID>>& edges, size_t new_size) {
+        if (edges.size() < new_size) {
+            edges.resize(new_size);
         }
-    }
-
-    std::vector<VertexID> build_table_order(q_num);
-    for (ui i = 0; i < q_num; ++i) {
-        build_table_order[i] = i;
-    }
-
-    std::sort(build_table_order.begin(), build_table_order.end(), [query_graph](VertexID l, VertexID r) {
-        if (query_graph->getVertexDegree(l) == query_graph->getVertexDegree(r)) {
-            return l < r;
+        for (size_t k = 0; k < new_size; ++k) {
+            edges[k].clear(); 
         }
-        return query_graph->getVertexDegree(l) > query_graph->getVertexDegree(r);
-    });
+    };
 
-    for (auto u : build_table_order) {
+    for (ui u = 0; u < q_num; u++) {
         ui u_nbrs_count;
         const VertexID* u_nbrs = query_graph->getVertexNeighbors(u, u_nbrs_count);
-        ui updated_flag_count = 0;
+        updated_flag.clear();
+        for (ui j = 0; j < cans[u].size(); ++j) {
+            VertexID v = cans[u][j];
+            flag[v] = j + 1;
+            updated_flag.push_back(v);
+        }
 
         for (ui i = 0; i < u_nbrs_count; ++i) {
             auto& u_nbr = u_nbrs[i];
-            if (edge_matrix[u][u_nbr] != nullptr)
+            if (visited[u] & (1ULL << u_nbr)) {
                 continue;
-
-            if (updated_flag_count == 0) {
-                for (ui j = 0; j < cans[u].size(); ++j) {
-                    VertexID v = cans[u][j];
-                    flag[v] = j + 1;
-                    updated_flag[updated_flag_count++] = v;
-                }
             }
+            visited[u] |= (1ULL << u_nbr);
+            visited[u_nbr] |= (1ULL << u);
 
-            edge_matrix[u_nbr][u] = new CSMEdges;
-            edge_matrix[u][u_nbr] = new CSMEdges;
-            edge_matrix[u_nbr][u]->edge_.resize(cans[u_nbr].size());
-            edge_matrix[u][u_nbr]->edge_.resize(cans[u].size());
+            CSMEdges* fwd_ptr = edge_matrix[u_nbr][u];
+            CSMEdges* bwd_ptr = edge_matrix[u][u_nbr];
+            reset_edge_vec(fwd_ptr->edge_, cans[u_nbr].size());
+            reset_edge_vec(bwd_ptr->edge_, cans[u].size());
 
             for (ui j = 0; j < cans[u_nbr].size(); ++j) {
                 VertexID v = cans[u_nbr][j];
@@ -87,13 +80,8 @@ void buildAuxImpl(ui dnum,
             }
         }
 
-        for (ui i = 0; i < updated_flag_count; ++i) {
-            VertexID v = updated_flag[i];
-            flag[v] = 0;
-        }
+        for (auto& v : updated_flag) flag[v] = 0;
     }
-    delete[] flag;
-    delete[] updated_flag;
 }
 
 void BuildAux::buildAux(
@@ -101,9 +89,12 @@ void BuildAux::buildAux(
     std::function<const VertexID*(VertexID, VertexID, VertexID, ui&)> get_neighbors,
     const Graph *query_graph, 
     vector<vector<VertexID>>& cans,
-    CSMEdges ***edge_matrix) 
+    CSMEdges ***edge_matrix,
+    vector<ui>& flag,
+    vector<ui>& updated_flag,
+    uint64_t* visited)
 {
-    buildAuxImpl(dnum, get_neighbors, query_graph, cans, edge_matrix);
+    buildAuxImpl(dnum, get_neighbors, query_graph, cans, edge_matrix, flag, updated_flag, visited);
 }
 
 void BuildAux::buildAux(
@@ -111,7 +102,10 @@ void BuildAux::buildAux(
     std::function<const vector<VertexID>&(VertexID, VertexID, VertexID, ui&)> get_neighbors,
     const Graph *query_graph, 
     vector<vector<VertexID>>& cans,
-    CSMEdges ***edge_matrix) 
+    CSMEdges ***edge_matrix,
+    vector<ui>& flag,
+    vector<ui>& updated_flag,
+    uint64_t* visited)
 {
-    buildAuxImpl(dnum, get_neighbors, query_graph, cans, edge_matrix);
+    buildAuxImpl(dnum, get_neighbors, query_graph, cans, edge_matrix, flag, updated_flag, visited);
 }

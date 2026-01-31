@@ -11,7 +11,10 @@ public:
         std::function<const VertexID*(VertexID, VertexID, VertexID, ui&)> get_neighbors,
         const Graph *query_graph, 
         vector<vector<VertexID>>& cans,
-        CSMEdges ***edge_matrix
+        CSMEdges ***edge_matrix,
+        vector<ui>& flag,
+        vector<ui>& updated_flag,
+        uint64_t* visited
     );
 
     // 情况 2: 回调返回 Vector (vector<VertexID>)
@@ -20,7 +23,10 @@ public:
         std::function<const vector<VertexID>&(VertexID, VertexID, VertexID, ui&)> get_neighbors,
         const Graph *query_graph, 
         vector<vector<VertexID>>& cans,
-        CSMEdges ***edge_matrix
+        CSMEdges ***edge_matrix,
+        vector<ui>& flag,
+        vector<ui>& updated_flag,
+        uint64_t* visited
     );
 };
 

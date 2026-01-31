@@ -69,7 +69,7 @@ void CSMEngine::init(const Graph *data_graph, const Graph *query_graph) {
     global_index = new CSMIndex;
     local_index = new CSMIndex;
     global_index->build_Aux(data_graph, query_graph);
-    local_index->aux.init(query_graph);
+    local_index->aux.init(query_graph, data_graph->getGraphMaxLabelFrequency());
     build_automorphism_edges(query_graph);
     build_edges_mapping(query_graph);
 }
@@ -107,7 +107,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
             auto t_build_end = QueryStats::now();
             QueryStats::add_duration(stats.time_try_build_ns, t_build_start, t_build_end);
             t_build_start = QueryStats::now();
-            local_index->aux.update(global_index->aux);
+            local_index->aux.updateData(global_index->aux, global_index->pruneCache);
             t_build_end = QueryStats::now();
             QueryStats::add_duration(stats.time_local_aux_ns, t_build_start, t_build_end);
             // ---------------------------
@@ -128,6 +128,8 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                 }
                 stats.total_candidates += current_cands;
                 stats.search_invocations++;
+                if (current_cands > stats.max_candidates) stats.max_candidates = current_cands;
+                if (current_cands < stats.min_candidates) stats.min_candidates = current_cands;
                 // ---------------------------
 
                 // --- 统计 BSXEngine ---

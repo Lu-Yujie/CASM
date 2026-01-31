@@ -12,65 +12,53 @@ const vector<VertexID>& Aux::getNeighbors(VertexID u_1, VertexID u_2, VertexID v
         return empty;
     }
     auto& edges = *(data[u_1][u_2]);
+    assert(edges.edge_.size() == cans[u_1].size() && "edge_.size() != cans[u1].size() — alignment broken");
     return edges[v_idx];
 }
-void Aux::init(const Graph* data_graph, const Graph* query_graph) {
-    this->query_graph = query_graph;
-    dnum = data_graph->getVerticesCount();
+void Aux::init(const Graph* query_graph, ui max_cans) {
     qnum = query_graph->getVerticesCount();
-
+    this->query_graph = query_graph;
     data = new CSMEdges **[qnum];
-    for (ui i = 0; i < qnum; ++i) {
-        data[i] = new CSMEdges *[qnum];
-        for (ui j = 0; j < qnum; ++j) {
-            data[i][j] = nullptr;
+    cans.resize(qnum);
+    for (ui u = 0; u < qnum; u++) {
+        cans[u].reserve(max_cans);
+        data[u] = new CSMEdges*[qnum];
+        memset(data[u], 0, sizeof(CSMEdges*)* qnum);
+        ui u_nbrs_count;
+        auto u_nbrs = query_graph->getVertexNeighbors(u, u_nbrs_count);
+        for (ui i = 0; i < u_nbrs_count; ++i) {
+            auto& u_nbr = u_nbrs[i];
+            data[u][u_nbr] = new CSMEdges;
         }
     }
+}
+void Aux::buildData(const Graph* data_graph, const Graph* query_graph, CSMPruneCache* pruneCache) {
+    dnum = data_graph->getVerticesCount();
     auto getNeighbors_ptr = [&](VertexID, VertexID, VertexID v, ui& count) {
         return data_graph->getVertexNeighbors(v, count);
     };
-    BuildAux::buildAux(dnum, getNeighbors_ptr, query_graph, cans, data);
+    BuildAux::buildAux(dnum, getNeighbors_ptr, query_graph, cans, data, pruneCache->flag_array, pruneCache->reset_buffer, pruneCache->visited_bitmask);
 }
-void Aux::init(const Graph* query_graph) {
-    qnum = query_graph->getVerticesCount();
-    this->query_graph = query_graph;
-    cans.resize(qnum);
-    data = new CSMEdges **[qnum];
-    for (ui i = 0; i < qnum; ++i) {
-        data[i] = new CSMEdges *[qnum];
-        for (ui j = 0; j < qnum; ++j) {
-            data[i][j] = nullptr;
-        }
-    }
-}
-void Aux::update(const Aux& global) {
-    this->dnum = global.dnum;
-    for (ui i = 0; i < qnum; i++) {
-        auto u = i;
-        ui u_nbrs_count;
-        auto u_nbrs = query_graph->getVertexNeighbors(u, u_nbrs_count);
-        for (ui k = 0; k < u_nbrs_count; ++k) { 
-            VertexID u_nbr = u_nbrs[k];
-            // 只删除 u 出发的方向,当循环到 u_nbr 时，它会负责删除 edge_matrix[u_nbr][u]
-            if (data[u][u_nbr] != nullptr) {
-                delete data[u][u_nbr];
-                data[u][u_nbr] = nullptr;
-            }
-        }
-    }
+void Aux::updateData(const Aux& global, CSMPruneCache* pruneCache) {
+    dnum = global.dnum;
     auto getNeighbors_vec = [&](VertexID u1, VertexID u2, VertexID v, ui& /*count*/) -> const vector<VertexID>& {
         return global.getNeighbors(u1, u2, v);
     };
-    BuildAux::buildAux(dnum, getNeighbors_vec, query_graph, cans, data);
+    BuildAux::buildAux(dnum, getNeighbors_vec, query_graph, cans, data, pruneCache->flag_array, pruneCache->reset_buffer, pruneCache->visited_bitmask);
 }
 
 CSMPruneCache* CSMIndex::pruneCache = nullptr;
 CSMPruneCache::CSMPruneCache(ui max_cans, ui qnum, ui dnum) {
+    if (qnum > 64) {
+        cout << "do not support query with #vertex > 64" << endl;
+        exit(-1);
+    }
     order = new VertexID[qnum];
-    visited.resize(qnum);
+    bfs_q.init(qnum);
+    visited_bitmask = new uint64_t[64];
+    all_visited = (qnum == 64) ? ~0ULL : ((1ULL << qnum) - 1);
     flag_array.resize(dnum, 0);
-    reset_buffer.reserve(dnum);
-    valid_cans_buffer.reserve(max_cans);
+    reset_buffer.reserve(max_cans);
 }
 
 // 只选择符合要求的边，然后构建辅助数据结构。以边为主要过滤条件，且不做传播剪枝
@@ -83,8 +71,9 @@ void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
     auto& cans = aux.cans;
     dnum = data_graph->getVerticesCount();
     qnum = query_graph->getVerticesCount();
-    cans.resize(qnum);
     auto max_cans = data_graph->getGraphMaxLabelFrequency();
+    pruneCache = new CSMPruneCache(max_cans, qnum, dnum);
+    aux.init(query_graph, max_cans);
 
     // 构建 cans
     ui unbrs_cnt = 0;
@@ -119,9 +108,7 @@ void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
     }
 
     for (ui i = 0; i < qnum; ++i) sort(cans[i].begin(), cans[i].end());
-    aux.init(data_graph, query_graph);
-
-    pruneCache = new CSMPruneCache(max_cans, qnum, dnum);
+    aux.buildData(data_graph, query_graph, pruneCache);
 }
 
 // --- 核心逻辑：确保候选点存在，若不存在则更新全局并同步所有邻居 ---
@@ -150,6 +137,7 @@ ui CSMIndex::ensure_candidate_global(ui u, ui v_can) {
             exit(-1);
         }
         edges->edge_.insert(edges->edge_.begin() + idx, vector<VertexID>());
+        assert(edges->edge_.size() == aux.cans[u].size());
     }
 
     return idx;
@@ -238,8 +226,8 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
 bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed) {
     auto& query_graph = aux.query_graph;
     auto& local_cans = this->aux.cans;
-    auto& visited = pruneCache->visited;
-    auto& bfs_q = pruneCache->bfs_q; // 需要用到队列将新波及的点入队
+    auto& visited = pruneCache->visited_bitmask[0];
+    auto& bfs_q = pruneCache->bfs_q;
 
     ui unbr_cnt = 0;
     const VertexID* unbrs = query_graph->getVertexNeighbors(u_fixed, unbr_cnt);
@@ -252,9 +240,9 @@ bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed,
         if (valid_candidates.empty()) return false;
 
         bool updated = false;
-        if (!visited[unbr]) {  // 第一次访问该邻居, 直接赋值
+        if (!get_bit(visited, unbr)) {  // 第一次访问该邻居, 直接赋值
             local_cans[unbr] = valid_candidates; 
-            visited[unbr] = true;
+            set_bit(visited, unbr);
             bfs_q.push(unbr);
         } else {  // 已经访问过, 求交
             SetOp::intersectAndUpdate(local_cans[unbr], valid_candidates);
@@ -277,6 +265,7 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
     auto& flag_array = pruneCache->flag_array;
     auto& reset_buffer = pruneCache->reset_buffer;
     auto& dnum = global->aux.dnum;
+    auto& visited = pruneCache->visited_bitmask[0];
 
     // 1. 清理 buffer
     reset_buffer.clear(); 
@@ -298,7 +287,7 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
     }
 
     // 3. Update Local Candidates
-    if (!pruneCache->visited[unbr]) {  // unbr 未访问, 将 reset_buffer 作为新的候选集
+    if (!get_bit(visited, unbr)) {  // unbr 未访问, 将 reset_buffer 作为新的候选集
         std::sort(reset_buffer.begin(), reset_buffer.end());
         for (VertexID v : reset_buffer) flag_array[v] = 0;  // clear buffer before swap
         local_cans[unbr].swap(reset_buffer);
@@ -313,7 +302,7 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
         }
         target.resize(write_idx);
 
-        for (VertexID v : reset_buffer) flag_array[v] = 0;  // clear buffer
+        for (auto& v : reset_buffer) flag_array[v] = 0;  // clear buffer
 
         if (target.empty()) return false;
     }
@@ -324,21 +313,23 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
 // --- 构建局部索引主流程 ---
 bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
     auto& qnum = aux.qnum;
+    const auto& all_visited = pruneCache->all_visited;
     auto& local_cans = this->aux.cans;
-    auto& visited = pruneCache->visited;
-    auto& bfs_q = pruneCache->bfs_q;
     auto& flag_array = pruneCache->flag_array;
     auto& dnum = global->aux.dnum;
-    std::fill(visited.begin(), visited.end(), false);
+    auto& visited = pruneCache->visited_bitmask[0];
+    visited = 0;
+    auto& bfs_q = pruneCache->bfs_q;
+    bfs_q.clear();
 
     auto q_src = qe.src();
     auto q_dst = qe.dst();
     local_cans[q_src].clear();
     local_cans[q_src].emplace_back(de.src());
-    visited[q_src] = true;
+    set_bit(visited, q_src);
     local_cans[q_dst].clear();
     local_cans[q_dst].emplace_back(de.dst());
-    visited[q_dst] = true;
+    set_bit(visited, q_dst);
 
     // 快速剪枝
     if (!edge_quick_prune(global, de, qe)) return false;
@@ -356,29 +347,28 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
         ui unbr_cnt = 0;
         const VertexID* unbrs = aux.query_graph->getVertexNeighbors(u, unbr_cnt);
 
-        // TODO: 可选优化：对 unbrs 进行排序，优先处理 visited 的点，或者度数小的点
         for (ui i = 0; i < unbr_cnt; ++i) {
             ui unbr = unbrs[i];
 
-            // 记录状态，propagate 内部会用
-            bool is_first_visit = !visited[unbr];
+            // 记录状态
+            bool was_visited = get_bit(visited, unbr);
+            // 自适应感知优化
+            // if (was_visited && local_cans[unbr].size() < 3) continue;
+            // 执行传播
+            if (!propagate_forward(global, u, unbr)) return false;
 
-            if (!propagate_forward(global, u, unbr)) {
-                return false; 
-            }
-
-            if (is_first_visit) {
-                visited[unbr] = true;
+            if (!was_visited) {
+                set_bit(visited, unbr);
                 bfs_q.push(unbr);
             }
         }
     }
 
     // 5. 孤立点检查 (处理非连通图)
+    if (LIKELY(visited == all_visited)) return true;
     for (ui i = 0; i < qnum; ++i) {
-        if (!visited[i]) {
+        if (!get_bit(visited, i)) {
             local_cans[i] = global->aux.cans[i];
-            visited[i] = true;
         }
         if (local_cans[i].empty()) return false;
     }
