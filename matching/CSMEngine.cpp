@@ -106,13 +106,14 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
             bool build_success = local_index->try_build_local(global_index, de.edge_, edge_group[0]);
             auto t_build_end = QueryStats::now();
             QueryStats::add_duration(stats.time_try_build_ns, t_build_start, t_build_end);
-            t_build_start = QueryStats::now();
-            local_index->aux.updateData(global_index->aux, global_index->pruneCache);
-            t_build_end = QueryStats::now();
-            QueryStats::add_duration(stats.time_local_aux_ns, t_build_start, t_build_end);
             // ---------------------------
 
             if (build_success) {
+                t_build_start = QueryStats::now();
+                local_index->aux.updateData(global_index->aux, global_index->mem);
+                t_build_end = QueryStats::now();
+                QueryStats::add_duration(stats.time_local_aux_ns, t_build_start, t_build_end);
+
                 mpz_set_ui(one_embedding_cnt, 0);
 
                 // 准备 Adapter
@@ -134,12 +135,14 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
 
                 // --- 统计 BSXEngine ---
                 auto t_bsx_start = QueryStats::now();
-                QueryEngine::BSXEngine(global_index->aux.dnum,
-                                       global_index->aux.query_graph,
-                                       adapter.edge_matrix_ptr,
-                                       adapter.candidates_ptr,
-                                       adapter.candidates_count_ptr,
-                                       global_index->pruneCache->order,
+                // QueryEngine::BSXEngine(global_index->aux.dnum,
+                //                        global_index->aux.query_graph,
+                //                        adapter.edge_matrix_ptr,
+                //                        adapter.candidates_ptr,
+                //                        adapter.candidates_count_ptr,
+                //                        global_index->mem->order,
+                //                        output_limit, one_embedding_cnt, end_time);
+                QueryEngine::QuickEngine(global_index, local_index,
                                        output_limit, one_embedding_cnt, end_time);
                 auto t_bsx_end = QueryStats::now();
                 QueryStats::add_duration(stats.time_bsx_ns, t_bsx_start, t_bsx_end);

@@ -1,8 +1,7 @@
 set(SUBGRAPH_MATCHING_FILE_LIST
-    QueryEngine.cpp
-    BuildAux.cpp
     CSMEngine.cpp
     CSMIndex.cpp
+    QueryEngine.cpp
     main.cpp
 )
 

@@ -2,6 +2,7 @@
 #define SUBGRAPHMATCHING_QUERY_ENGINE_H
 
 #include "utils/bsx/bsx.h"
+#include "CSMIndex.h"
 #include <vector>
 #include <queue>
 #include <unordered_set>
@@ -11,11 +12,20 @@
 class QueryEngine {
 public:
     static void
+    QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_num,
+                mpz_t embedding_cnt, int64_t& time_limit);
+
+    static void
     BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix, ui **candidates,
               ui *candidates_count, ui *order, size_t output_limit_num,
               mpz_t embedding_cnt, int64_t& time_limit);
 
 private:
+    static void quickEnum(QuickIndex& index);
+
+    static ui quickRefine(CSMIndex* global, VertexID u, VertexID v);
+    static void quickDeRefine(CSMIndex* global, VertexID u);
+
     static void bsxMaxCoverOrder(const Graph *graph, ui*& order, ui& num_cover, ui *candidates_count);
 
     static void bsxDeRefine(BSXIndex& index);

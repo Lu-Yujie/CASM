@@ -1,66 +1,11 @@
 #include "CSMIndex.h"
 #include "utils/setOp.h"
 #include "utils/bSearch.h"
-#include "BuildAux.h"
 #include <set>
 #include "assert.h"
 using namespace std;
 
-const vector<VertexID>& Aux::getNeighbors(VertexID u_1, VertexID u_2, VertexID v) const {
-    auto v_idx = b_search::lower_bound_idx(cans[u_1], v);
-    if (v_idx == cans[u_1].size()  || cans[u_1][v_idx] != v) {
-        return empty;
-    }
-    auto& edges = *(data[u_1][u_2]);
-    assert(edges.edge_.size() == cans[u_1].size() && "edge_.size() != cans[u1].size() — alignment broken");
-    return edges[v_idx];
-}
-void Aux::init(const Graph* query_graph, ui max_cans) {
-    qnum = query_graph->getVerticesCount();
-    this->query_graph = query_graph;
-    data = new CSMEdges **[qnum];
-    cans.resize(qnum);
-    for (ui u = 0; u < qnum; u++) {
-        cans[u].reserve(max_cans);
-        data[u] = new CSMEdges*[qnum];
-        memset(data[u], 0, sizeof(CSMEdges*)* qnum);
-        ui u_nbrs_count;
-        auto u_nbrs = query_graph->getVertexNeighbors(u, u_nbrs_count);
-        for (ui i = 0; i < u_nbrs_count; ++i) {
-            auto& u_nbr = u_nbrs[i];
-            data[u][u_nbr] = new CSMEdges;
-        }
-    }
-}
-void Aux::buildData(const Graph* data_graph, const Graph* query_graph, CSMPruneCache* pruneCache) {
-    dnum = data_graph->getVerticesCount();
-    auto getNeighbors_ptr = [&](VertexID, VertexID, VertexID v, ui& count) {
-        return data_graph->getVertexNeighbors(v, count);
-    };
-    BuildAux::buildAux(dnum, getNeighbors_ptr, query_graph, cans, data, pruneCache->flag_array, pruneCache->reset_buffer, pruneCache->visited_bitmask);
-}
-void Aux::updateData(const Aux& global, CSMPruneCache* pruneCache) {
-    dnum = global.dnum;
-    auto getNeighbors_vec = [&](VertexID u1, VertexID u2, VertexID v, ui& /*count*/) -> const vector<VertexID>& {
-        return global.getNeighbors(u1, u2, v);
-    };
-    BuildAux::buildAux(dnum, getNeighbors_vec, query_graph, cans, data, pruneCache->flag_array, pruneCache->reset_buffer, pruneCache->visited_bitmask);
-}
-
-CSMPruneCache* CSMIndex::pruneCache = nullptr;
-CSMPruneCache::CSMPruneCache(ui max_cans, ui qnum, ui dnum) {
-    if (qnum > 64) {
-        cout << "do not support query with #vertex > 64" << endl;
-        exit(-1);
-    }
-    order = new VertexID[qnum];
-    bfs_q.init(qnum);
-    visited_bitmask = new uint64_t[64];
-    all_visited = (qnum == 64) ? ~0ULL : ((1ULL << qnum) - 1);
-    flag_array.resize(dnum, 0);
-    reset_buffer.reserve(max_cans);
-}
-
+MemoryManager* CSMIndex::mem = nullptr;
 // 只选择符合要求的边，然后构建辅助数据结构。以边为主要过滤条件，且不做传播剪枝
 void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
 // 首先构建每个点的candidates，然后构建边
@@ -72,7 +17,7 @@ void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
     dnum = data_graph->getVerticesCount();
     qnum = query_graph->getVerticesCount();
     auto max_cans = data_graph->getGraphMaxLabelFrequency();
-    pruneCache = new CSMPruneCache(max_cans, qnum, dnum);
+    mem = new MemoryManager(max_cans, qnum, dnum, query_graph);
     aux.init(query_graph, max_cans);
 
     // 构建 cans
@@ -108,7 +53,7 @@ void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
     }
 
     for (ui i = 0; i < qnum; ++i) sort(cans[i].begin(), cans[i].end());
-    aux.buildData(data_graph, query_graph, pruneCache);
+    aux.buildData(data_graph, query_graph, mem);
 }
 
 // --- 核心逻辑：确保候选点存在，若不存在则更新全局并同步所有邻居 ---
@@ -226,8 +171,8 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
 bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed) {
     auto& query_graph = aux.query_graph;
     auto& local_cans = this->aux.cans;
-    auto& visited = pruneCache->visited_bitmask[0];
-    auto& bfs_q = pruneCache->bfs_q;
+    auto& visited = mem->visited_bitmask[0];
+    auto& bfs_q = mem->bfs_q;
 
     ui unbr_cnt = 0;
     const VertexID* unbrs = query_graph->getVertexNeighbors(u_fixed, unbr_cnt);
@@ -262,10 +207,10 @@ bool CSMIndex::edge_quick_prune(const CSMIndex* global, Edge de, Edge qe) {
 // --- 通用前向传播 (BFS Step) ---
 bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
     auto& local_cans = this->aux.cans;
-    auto& flag_array = pruneCache->flag_array;
-    auto& reset_buffer = pruneCache->reset_buffer;
+    auto& flag_array = mem->flag_array;
+    auto& reset_buffer = mem->reset_buffer;
     auto& dnum = global->aux.dnum;
-    auto& visited = pruneCache->visited_bitmask[0];
+    auto& visited = mem->visited_bitmask[0];
 
     // 1. 清理 buffer
     reset_buffer.clear(); 
@@ -313,13 +258,13 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
 // --- 构建局部索引主流程 ---
 bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
     auto& qnum = aux.qnum;
-    const auto& all_visited = pruneCache->all_visited;
+    const auto& all_visited = mem->all_visited;
     auto& local_cans = this->aux.cans;
-    auto& flag_array = pruneCache->flag_array;
+    auto& flag_array = mem->flag_array;
     auto& dnum = global->aux.dnum;
-    auto& visited = pruneCache->visited_bitmask[0];
+    auto& visited = mem->visited_bitmask[0];
     visited = 0;
-    auto& bfs_q = pruneCache->bfs_q;
+    auto& bfs_q = mem->bfs_q;
     bfs_q.clear();
 
     auto q_src = qe.src();

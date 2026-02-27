@@ -25,6 +25,9 @@ public:
     static vector<ui> intersectTwo(const ui* array1, const ui* array2, ui array1_size, ui array2_size);
     static vector<ui> intersectTwo(const vector<ui>& array1, const vector<ui>& array2);
     static vector<ui> intersectTwo(const vector<ui>& array1, const ui* array2, ui array2_size);
+    static ui intersectTwo(const ui* array1, const ui* array2, ui array1_size, ui array2_size, ui* buffer);
+    static ui intersectTwo(const vector<ui>& array1, const vector<ui>& array2, ui* buffer);
+    static ui intersectTwo(const vector<ui>& array1, const ui* array2, ui array2_size, ui* buffer);
 
     // A = A n B
     static void intersectAndUpdate(vector<ui>& A, const vector<ui>& B);

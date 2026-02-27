@@ -1,64 +1,22 @@
-#ifndef SM_CSMINDEX_H
-#define SM_CSMINDEX_H
+#ifndef LU_CSMINDEX_H
+#define LU_CSMINDEX_H
 
-// 在 filter 生成的 candidate sets 的基础上搞一套索引，反正是离线的，最终的结构应该也是一个 index 结构。
-// 默认 index 结构就是每个查询点一组 candidates，然后在 candidates 之间连边的结构。
-// filter 规则，往复两轮的一阶邻居判断，不能判断高阶邻居，太慢了，三轮也太慢。
-// 第一次先指定一个顺序，从 candidates 最少到最多，然后反向一次
-//
-#include "graph/graph.h"
-#include "utils/fastQueue.h"
+#include "utils/quick/quickIndex.h"
+#include "utils/quick/memoryManager.h"
+#include "utils/quick/aux.h"
+
 using namespace std;
 
-struct CSMPruneCache {
-    VertexID* order = nullptr;
-    FastCircularQueue<ui> bfs_q;
-    vector<ui> flag_array;
-    vector<ui> reset_buffer;
-    uint64_t* visited_bitmask = nullptr;
-    uint64_t all_visited;
-
-    CSMPruneCache() {}
-    CSMPruneCache(ui max_cans, ui qnum, ui dnum);
-    ~CSMPruneCache() {
-        delete[] order;
-        delete[] visited_bitmask;
-    }
-};
-
-struct Aux {
-    CSMEdges*** data = nullptr;
-    vector<vector<VertexID>> cans;
-    vector<VertexID> empty;
-    const Graph* query_graph = nullptr;
-    ui dnum, qnum;
-    Aux() {}
-    ~Aux() {
-        if (data != nullptr) {
-            for (ui i = 0; i < qnum; i++) {
-                for (ui j = 0; j < qnum; j++) { if (data[i][j]) delete data[i][j];}
-                delete[] data[i];
-            }
-            delete[] data;
-        }
-    }
-    void init(const Graph* query_graph, ui max_cans);
-    void buildData(const Graph* data_graph, const Graph* query_graph, CSMPruneCache* pruneCache);
-    void updateData(const Aux& global, CSMPruneCache* pruneCache);
-    const vector<VertexID>& getNeighbors(VertexID u_1, VertexID u_2, VertexID v) const;
-};
-
 class CSMIndex {
-private:
-    Aux aux;
-    static CSMPruneCache* pruneCache;
-    friend class CSMEngine;
 public:
+    Aux aux;
+    static MemoryManager* mem;
+
     CSMIndex() {}
     ~CSMIndex() {
-        if (pruneCache != nullptr) {
-            delete pruneCache;
-            pruneCache = nullptr;
+        if (mem != nullptr) {
+            delete mem;
+            mem = nullptr;
         }
     }
     bool try_build_local(const CSMIndex* global, Edge de, Edge qe);

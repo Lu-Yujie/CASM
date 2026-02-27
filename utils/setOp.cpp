@@ -25,6 +25,22 @@ namespace {
             }
         }
     }
+    template <typename InputIt1, typename InputIt2>
+    ui impl_intersect(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2, ui* buffer) {
+        ui cnt = 0;
+        while (first1 != last1 && first2 != last2) {
+            if (*first1 < *first2) {
+                ++first1;
+            } else if (*first1 > *first2) {
+                ++first2;
+            } else {
+                buffer[cnt++] = *first1; // 直接写入 buffer 并递增计数
+                ++first1;
+                ++first2;
+            }
+        }
+        return cnt;
+    }
 
     // 通用差集逻辑: A = A - B
     template <typename ContainerA, typename InputItB>
@@ -190,6 +206,18 @@ vector<ui> SetOp::intersectTwo(const vector<ui>& array1, const ui* array2, ui ar
     vector<ui> result;
     impl_intersect(array1.begin(), array1.end(), array2, array2 + array2_size, result);
     return result;
+}
+
+ui SetOp::intersectTwo(const ui* array1, const ui* array2, ui array1_size, ui array2_size, ui* buffer) {
+    return impl_intersect(array1, array1 + array1_size, array2, array2 + array2_size, buffer);
+}
+
+ui SetOp::intersectTwo(const vector<ui>& array1, const vector<ui>& array2, ui* buffer) {
+    return impl_intersect(array1.begin(), array1.end(), array2.begin(), array2.end(), buffer);
+}
+
+ui SetOp::intersectTwo(const vector<ui>& array1, const ui* array2, ui array2_size, ui* buffer) {
+    return impl_intersect(array1.begin(), array1.end(), array2, array2 + array2_size, buffer);
 }
 
 void SetOp::intersectAndUpdate(vector<ui>& A, const vector<ui>& B) {

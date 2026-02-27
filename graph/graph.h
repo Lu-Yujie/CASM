@@ -73,23 +73,23 @@ public:
     void load_updates(const std::string& file_path, std::vector<Update>& stream);
     void printGraphMetaData();
 public:
-    const ui getLabelsCount() const {
+    inline const ui& getLabelsCount() const {
         return vlabels_count_;
     }
 
-    const ui getVerticesCount() const {
+    inline const ui& getVerticesCount() const {
         return vertices_count_;
     }
 
-    const ui getEdgesCount() const {
+    inline const ui& getEdgesCount() const {
         return edges_count_;
     }
 
-    const ui getGraphMaxDegree() const {
+    inline const ui& getGraphMaxDegree() const {
         return max_degree_;
     }
 
-    const ui getGraphMaxLabelFrequency() const {
+    inline const ui& getGraphMaxLabelFrequency() const {
         return max_vlabel_frequency_;
     }
 

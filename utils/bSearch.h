@@ -1,3 +1,6 @@
+#ifndef LU_BSEARCH_H
+#define LU_BSEARCH_H
+
 #include <vector>
 #include <algorithm>
 using ui = unsigned int; 
@@ -25,3 +28,5 @@ public:
         return lower_bound_idx(arr.data(), (ui)arr.size(), target);
     }
 };
+
+#endif

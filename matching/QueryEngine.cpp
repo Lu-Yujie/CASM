@@ -8,6 +8,159 @@
 #include <sys/stat.h>
 #include <timeOp.h>
 
+void
+QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_num,
+                         mpz_t embedding_cnt, int64_t& time_limit) {
+    auto& query_graph = global->aux.query_graph;
+    auto& qnum = global->aux.qnum;
+
+    auto& quick_index = *(global->mem->quick_index);
+    auto& valid_cans = quick_index.valid_cans;
+    auto& valid_idx = quick_index.valid_idx;
+    auto& visited_u = quick_index.visited_u;
+    auto& visited_v = quick_index.visited_v;
+    auto& influenced_cnt = quick_index.influenced_u_cnt;
+
+    auto& embedding = quick_index.embedding;
+    auto& u2v = quick_index.embedding->u2v;
+
+    auto& indep_info = *(quick_index.indep_info);
+    auto& cover_set = indep_info.cover_set;
+    auto& cover_num = indep_info.cover_num;
+    auto& indep_embeddings = indep_info.embedding_level[0];
+
+    auto& local_cans = local->aux.cans;
+    for (ui i = 0; i < qnum; i++) {
+        valid_cans[i].importRootCandidates(local_cans[i].data(), local_cans[i].size());
+    }
+
+    mpz_set_ui(embedding_cnt, 0);
+    ui cur_depth = 0;
+    VertexID start_vertex = cover_set[cur_depth];
+    visited_u[start_vertex] = true;
+    valid_idx[start_vertex] = 0;
+
+    while (true) {
+        while (valid_idx[cover_set[cur_depth]] < valid_cans[cover_set[cur_depth]].cur_cans_cnt()) {
+            VertexID u = cover_set[cur_depth];
+            VertexID v = valid_cans[u].cur_cans()[valid_idx[u]];
+            // cout << "u: " << u << ", v: " << v << endl;
+            valid_idx[u]++;
+            if (visited_v[v]) continue;
+
+            VertexID failed_u = quickRefine(global, u, v);
+            if (failed_u != (ui)-1) {  // no valid cans for next depth
+                // cout << "u: " << u << ", failed_u: " << failed_u << ", fail" << endl;
+                continue;
+            }
+
+            u2v[u] = v;
+            visited_v[v] = true;
+
+            if (cur_depth >= cover_num - 1) {
+                // enumerate results on indep nodes, process ancestors' ves by the way
+                quickEnum(quick_index);
+                // gmp_printf("new result: %Zd\n", level_embeddings);
+                mpz_add(embedding_cnt, embedding_cnt, indep_embeddings);
+                // next batch
+                quickDeRefine(global, u);
+                visited_v[v] = false;
+            } else {
+                cur_depth++;
+                VertexID nxt_u = cover_set[cur_depth];
+                valid_idx[nxt_u] = 0;
+                visited_u[nxt_u] = true;
+            }
+        }
+
+        // backtracking
+        cur_depth -= 1;
+        if (cur_depth == ui(-1))
+            break;
+        auto& last_u = cover_set[cur_depth+1];
+        auto& cur_u = cover_set[cur_depth];
+        visited_u[last_u] = false;
+        visited_v[u2v[cur_u]] = false;
+
+        quickDeRefine(global, cur_u);
+    }
+
+    // Release the buffer.
+    return;
+}
+
+ui
+QueryEngine::quickRefine(CSMIndex* global, VertexID u, VertexID v) {
+    auto& qnum = global->aux.qnum;
+    auto& query_graph = global->aux.query_graph;
+    auto& quick_index = *(global->mem->quick_index);
+    auto& valid_cans = quick_index.valid_cans;
+    auto& visited_u = quick_index.visited_u;
+    auto& visited_v = quick_index.visited_v;
+
+    auto& influenced = quick_index.influenced_u[u];
+    auto& influenced_cnt = quick_index.influenced_u_cnt[u];
+    influenced_cnt = 0;
+    ui unbrs_cnt;
+    auto unbrs = query_graph->getVertexNeighbors(u, unbrs_cnt);
+    for (ui i = 0; i < unbrs_cnt; i++) {
+        auto& unbr = unbrs[i];
+        if (visited_u[unbr]) continue;
+        // old valid_cans of unbr
+        auto& vnbrs = global->aux.getNeighbors(u, unbr, v);
+        auto u_cans = valid_cans[unbr].cur_cans();
+        auto u_cans_cnt = valid_cans[unbr].cur_cans_cnt();
+        auto u_nxt_cans = valid_cans[unbr].next_buffer();
+        auto& u_next_cans_cnt = valid_cans[unbr].next_buffer_cnt();
+        u_next_cans_cnt = SetOp::intersectTwo(vnbrs, u_cans, u_cans_cnt, u_nxt_cans);
+        if (u_next_cans_cnt == 0) {
+            influenced_cnt = 0;
+            return unbr;
+        }
+
+        if (u_cans_cnt == u_next_cans_cnt) continue;  // no change, no push
+        influenced[influenced_cnt++] = unbr;  // cnt is cleared when visited_u is set
+    }
+    for (ui i = 0; i < influenced_cnt; i++) {
+        valid_cans[influenced[i]].push();
+    }
+
+    return (ui)-1;
+}
+
+/**Reverse op of BSXRefine
+ * pop the valid_cans of influenced_u
+ * process oneCansV from refinement
+*/
+void
+QueryEngine::quickDeRefine(CSMIndex* global, VertexID u) {
+    auto& quick_index = *(global->mem->quick_index);
+    auto& valid_cans = quick_index.valid_cans;
+    auto& influenced = quick_index.influenced_u[u];
+    auto& influenced_cnt = quick_index.influenced_u_cnt[u];
+
+    for (ui i = 0; i < influenced_cnt; i++) {
+        auto& influenced_u = influenced[i];
+        valid_cans[influenced_u].pop();
+    }
+}
+
+void
+QueryEngine::quickEnum(QuickIndex& index) {
+    auto& nodes = index.indep_info->indep_set;
+    auto& nodes_num = index.indep_info->indep_num;
+    auto& enum_cans = index.indep_info->enum_cans;
+    auto& enum_cans_cnt = index.indep_info->enum_cans_cnt;
+    for (ui i = 0; i < nodes_num; i++) {
+        enum_cans[i] = index.valid_cans[nodes[i]].cur_cans();
+        enum_cans_cnt[i] = index.valid_cans[nodes[i]].cur_cans_cnt();
+    }
+    // extract the candidates of indep vertices
+    index.indep_info->enumeration(index.visited_v);
+
+    return;
+}
+
 /**
  * use bsx method
 */
