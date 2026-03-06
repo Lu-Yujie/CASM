@@ -10,7 +10,7 @@ using namespace std;
 struct MemoryManager {
     FastCircularQueue<ui> bfs_q;
 
-    vector<ui> flag_array;
+    vector<bool> flag_array;
     vector<ui> reset_buffer;
 
     uint64_t* visited_bitmask;

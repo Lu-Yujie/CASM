@@ -67,7 +67,7 @@ struct QueryAdapter {
 private:
     // 核心转换逻辑：vector<vector> -> CSR
     void convert_to_csr(CSMEdges* src, Edges* dst) {
-        auto& vec_data = src->edge_;
+        auto& vec_data = src->edge_map;
         ui rows = vec_data.size();
 
         dst->vertex_count_ = rows;
@@ -75,7 +75,7 @@ private:
         // 1. 计算边总数
         size_t total_edges = 0;
         for (const auto& row : vec_data) {
-            total_edges += row.size();
+            total_edges += row.second.size();
         }
         dst->edge_count_ = total_edges;
 

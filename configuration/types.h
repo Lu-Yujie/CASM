@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <functional>
 #include <vector>
+#include <absl/container/flat_hash_map.h>
+
 using namespace std;
 
 typedef unsigned int ui;
@@ -85,11 +87,11 @@ public:
 };
 
 struct CSMEdges {
-    vector<vector<VertexID>> edge_;
+    absl::flat_hash_map<VertexID, std::vector<VertexID>> edge_map;
     CSMEdges() {}
     ~CSMEdges() {}
-    vector<VertexID>& operator[] (ui v_idx) { return edge_[v_idx]; }
-    ui v_cnt() { return edge_.size(); }
+    vector<VertexID>& operator[] (ui v_idx) { return edge_map[v_idx]; }
+    ui v_cnt() { return edge_map.size(); }
 };
 
 #endif //SUBGRAPHMATCHING_TYPES_H

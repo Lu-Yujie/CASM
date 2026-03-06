@@ -56,66 +56,36 @@ void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
     aux.buildData(data_graph, query_graph, mem);
 }
 
-// --- 核心逻辑：确保候选点存在，若不存在则更新全局并同步所有邻居 ---
-// 返回该候选点在 cans[u] 中的 index
-ui CSMIndex::ensure_candidate_global(ui u, ui v_can) {
-    auto& query_graph = aux.query_graph;
+// --- 核心逻辑：确保候选点存在 ---
+void CSMIndex::ensure_candidate_global(VertexID u, VertexID v_can) {
     auto& u_cans = aux.cans[u];
 
-    // 1. 查找位置 & insert
     ui idx = b_search::lower_bound_idx(u_cans, v_can);
     if (idx < u_cans.size() && u_cans[idx] == v_can) {
-        return idx;
+        return; // 已存在
     }
     u_cans.insert(u_cans.begin() + idx, v_can);
-
-    // 2. 同步更新 u 的所有邻居的 edge_matrix
-    // 即使不是当前正在处理的边，也需要插入一个空行，以保持 offset 索引与 cans 一致
-    ui u_nbrs_cnt = 0;
-    const VertexID* u_nbrs = query_graph->getVertexNeighbors(u, u_nbrs_cnt);
-
-    for (ui i = 0; i < u_nbrs_cnt; ++i) {
-        ui nbr = u_nbrs[i];
-        CSMEdges* edges = aux.data[u][nbr];
-        if (edges == nullptr) {
-            cerr << "insert v_edge to un-existed u_edge(" << u << "->" << nbr << ")" << endl;
-            exit(-1);
-        }
-        edges->edge_.insert(edges->edge_.begin() + idx, vector<VertexID>());
-        assert(edges->edge_.size() == aux.cans[u].size());
-    }
-
-    return idx;
-}
-
-// 仅查找 index
-ui CSMIndex::find_candidate_index(ui u, ui v_can) {
-    auto& u_cans = aux.cans[u];
-    if (u_cans.empty()) return -1;
-
-    ui idx = b_search::lower_bound_idx(u_cans, v_can);
-    if (idx < u_cans.size() && u_cans[idx] == v_can) {
-        return idx;
-    }
-    return -1;
 }
 
 // --- 辅助函数：在已知行(row_idx)中插入一条边 v_nbr ---
-void CSMIndex::insert_edge_at_index(CSMEdges* edges, ui row_idx, ui v_nbr) {
+void CSMIndex::insert_edge_at_index(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
     if (edges == nullptr) return;
 
-    auto& row = edges->edge_[row_idx];
+    auto& row = edges->edge_map[v_src]; 
     ui idx = b_search::lower_bound_idx(row, v_nbr);
     if (idx == row.size() || row[idx] != v_nbr) {
-        row.insert(row.begin() + idx, v_nbr);
+        row.insert(row.begin() + idx, v_nbr); // 保持邻接表有序
     }
 }
 
 // --- 辅助函数：在已知行(row_idx)中删除一条边 v_nbr ---
-void CSMIndex::delete_edge_at_index(CSMEdges* edges, ui row_idx, ui v_nbr) {
+void CSMIndex::delete_edge_at_index(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
     if (edges == nullptr) return;
 
-    auto& row = edges->edge_[row_idx];
+    auto it = edges->edge_map.find(v_src);
+    if (it == edges->edge_map.end()) return;
+
+    auto& row = it->second;
     ui idx = b_search::lower_bound_idx(row, v_nbr);
     if (idx < row.size() && row[idx] == v_nbr) {
         row.erase(row.begin() + idx);
@@ -145,23 +115,18 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
             if (v_dst >= dnum) dnum = v_dst + 1;
 
             // 1. 确保候选点存在 (会触发全局同步)
-            ui src_idx = ensure_candidate_global(u_src, v_src);
-            ui dst_idx = ensure_candidate_global(u_dst, v_dst);
+            ensure_candidate_global(u_src, v_src);
+            ensure_candidate_global(u_dst, v_dst);
             // assert(aux.cans[u_src].size() == aux.data[u_src][u_dst]->edge_.size());
             // assert(aux.cans[u_dst].size() == aux.data[u_dst][u_src]->edge_.size());
 
             // 2. 插入边
-            insert_edge_at_index(all_edges[u_src][u_dst], src_idx, v_dst);
-            insert_edge_at_index(all_edges[u_dst][u_src], dst_idx, v_src);
+            insert_edge_at_index(all_edges[u_src][u_dst], v_src, v_dst);
+            insert_edge_at_index(all_edges[u_dst][u_src], v_dst, v_src);
         } else if (op == '-') {  // === 删除操作 ===
-            // 1. 查找候选点位置
-            ui src_idx = find_candidate_index(u_src, v_src);
-            ui dst_idx = find_candidate_index(u_dst, v_dst);
-            if (src_idx == (ui)-1 || dst_idx == (ui)-1) continue;
-
             // 2. 删除边
-            delete_edge_at_index(all_edges[u_src][u_dst], src_idx, v_dst);
-            delete_edge_at_index(all_edges[u_dst][u_src], dst_idx, v_src);
+            delete_edge_at_index(all_edges[u_src][u_dst], v_src, v_dst);
+            delete_edge_at_index(all_edges[u_dst][u_src], v_dst, v_src);
         }
     }
 }
