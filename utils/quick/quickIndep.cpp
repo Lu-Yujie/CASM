@@ -10,7 +10,6 @@ QuickIndep::QuickIndep(ui dnum, const Graph* query_graph, bool* visited_u) {
     indep_con_cnt = new ui[dnum];
     memset(indep_con_cnt, 0, sizeof(ui)*dnum);
 
-    sep_flag = new ui[qnum];
     degree = new ui[qnum];
 
     cover_set = new VertexID[qnum];
@@ -20,9 +19,8 @@ QuickIndep::QuickIndep(ui dnum, const Graph* query_graph, bool* visited_u) {
     enum_cans = new const VertexID*[indep_num];
     enum_cans_cnt = new ui[indep_num];
     enum_idx = new ui[indep_num];
-    enum_cnt = new ui[indep_num];
     un_con_cnt = new ui[indep_num];
-    local_cans_ptrs_.resize(indep_num);
+    phase = new bool[indep_num];
 
     embedding_level = new mpz_t[indep_num];
     for (ui i = 0 ; i < indep_num; i++) mpz_init(embedding_level[i]);
@@ -30,171 +28,121 @@ QuickIndep::QuickIndep(ui dnum, const Graph* query_graph, bool* visited_u) {
 
 QuickIndep::~QuickIndep() {
     delete[] indep_con_cnt;
-    delete[] sep_flag;
     delete[] degree;
     delete[] cover_set;
     delete[] enum_cans;
     delete[] enum_cans_cnt;
     delete[] enum_idx;
-    delete[] enum_cnt;
     delete[] un_con_cnt;
+    delete[] phase;
 
     for (ui i = 0 ; i < indep_num; i++) mpz_clear(embedding_level[i]);
     delete[] embedding_level;
 }
 
 void QuickIndep::enumeration(bool* visited_v) {
-    // 2. 计算所需 buffer 总大小 并 填充节点列表
-    size_t total_buffer_needed = 0;
-    for (ui i = 0; i < indep_num; i++) {
-        total_buffer_needed += enum_cans_cnt[i];
-    }
-
-    // 3. 扩容 buffer
-    if (local_cans_buffer_.size() < total_buffer_needed) {
-        local_cans_buffer_.resize(total_buffer_needed);
-    }
-
-    // 4. 全局极速拷贝 (Memcpy)
-    ui* buffer_cursor = local_cans_buffer_.data();
+    // Count conflicts
     for (ui i = 0; i < indep_num; i++) {
         ui cnt = enum_cans_cnt[i];
-        local_cans_ptrs_[i] = buffer_cursor; 
-        std::memcpy(buffer_cursor, enum_cans[i], cnt * sizeof(VertexID));
-        buffer_cursor += cnt;
-    }
-
-    // ----------------------------------------------------------------
-    // Pass 1: Count conflicts
-    for (ui i = 0; i < indep_num; i++) {
-        ui* v_cans = local_cans_ptrs_[i];
-        ui cnt = enum_cans_cnt[i];
+        const VertexID* cans = enum_cans[i];
         for (ui j = 0; j < cnt; j++) {
-            indep_con_cnt[v_cans[j]]++;
+            indep_con_cnt[cans[j]] = i; 
         }
     }
 
-    // Pass 2: Partition
-    for (ui i = 0; i < indep_num; i++) {
-        ui* v_cans = local_cans_ptrs_[i];
-        ui cnt = enum_cans_cnt[i];
-        auto& downward_sep0 = sep_flag[i];   
-
-        for (ui j = 0; j < cnt; j++) {
-            indep_con_cnt[v_cans[j]]--;
-        }
-
-        // 划分：如果在剩余节点中计数仍 > 0，说明后面还有人要用它，归为 Conflict 部分
-        downward_sep0 = sepDiff(v_cans, indep_con_cnt, 0, (int)cnt - 1);
-    }
-
-    // Pass 3: Enumerate (一次性递归所有节点)
     enum4Parts(visited_v);
 }
 
-// ----------------------------------------------------------------------
-// 分区辅助函数 (纯指针操作，无 vector)
-ui QuickIndep::sepDiff(ui* v_cans, const ui *indep_con_cnt, int forward_idx, int backward_idx) {
-    if (backward_idx - forward_idx == 0) return indep_con_cnt[v_cans[forward_idx]] != 0;
-
-    ui first_con_cnt = indep_con_cnt[v_cans[forward_idx]];
-    VertexID first_val = v_cans[forward_idx];
-    while(forward_idx < backward_idx) {
-        while(forward_idx < backward_idx && !indep_con_cnt[v_cans[backward_idx]]) backward_idx--;
-        if (forward_idx < backward_idx) v_cans[forward_idx++] = v_cans[backward_idx];
-
-        while(forward_idx < backward_idx && indep_con_cnt[v_cans[forward_idx]]) forward_idx++;
-        if (forward_idx < backward_idx) v_cans[backward_idx--] = v_cans[forward_idx];
-    }
-
-    v_cans[forward_idx] = first_val;
-    if (first_con_cnt) forward_idx++;
-    return forward_idx;
-}
-
-// ----------------------------------------------------------------------
-// 递归枚举核心 (纯指针操作)
 void QuickIndep::enum4Parts(bool* visited_v) {
-    ui depth = 0;
+    if (indep_num == 0) return;
 
+    ui depth = 0;
     auto& idx = enum_idx;
-    auto& cnt = enum_cnt;
-    auto& cans = local_cans_ptrs_;
+    auto& cans = enum_cans;
     auto& cans_cnt = enum_cans_cnt;
 
-    // 初始化第一层
-    idx[depth] = 0;
-    // 如果 sep_flag 有效，先搜冲突部分；否则全搜
-    cnt[depth] = sep_flag[0] < cans_cnt[0] ? sep_flag[0] + 1 : cans_cnt[0];
-
-    mpz_set_ui(embedding_level[depth], 0);
-    un_con_cnt[depth] = 0;
+    idx[0] = 0;
+    phase[0] = true;
+    mpz_set_ui(embedding_level[0], 0);
 
     while (true) {
-        while (idx[depth] < cnt[depth]) {
-            VertexID v = cans[depth][idx[depth]]; 
-            ui& cur_sep = sep_flag[depth];
+        // --- 叶子节点逻辑保持不变 ---
+        if (depth == indep_num - 1) {
+            ui tmp_cnt = 0;
+            ui leaf_size = cans_cnt[depth];
+            const VertexID* leaf_cans = cans[depth];
+            for (ui i = 0; i < leaf_size; i++) {
+                if (!visited_v[leaf_cans[i]]) tmp_cnt++;
+            }
+            mpz_add_ui(embedding_level[depth], embedding_level[depth], tmp_cnt);
+            goto BACKTRACK;
+        }
 
-            if (depth == indep_num - 1) {
-                // Leaf Node: 直接统计剩余可用候选
-                ui tmp_cnt = 0;
-                ui leaf_size = cans_cnt[depth];
-                ui* leaf_cans = cans[depth];
-                for (ui i = 0; i < leaf_size; i++) {
-                    if (!visited_v[leaf_cans[i]]) tmp_cnt++;
-                }
-                mpz_add_ui(embedding_level[depth], embedding_level[depth], tmp_cnt);
-                break; 
-            } else {
+        // --- Phase 1: 优先处理所有冲突节点 (常规 DFS) ---
+        if (phase[depth]) {
+            bool pushed = false;
+            while (idx[depth] < cans_cnt[depth]) {
+                VertexID v = cans[depth][idx[depth]];
                 idx[depth]++;
-
-                // 判断是否进入了 "无冲突块" (Optimization Block)
-                if (idx[depth] > cur_sep) {
-                    ui current_size = cans_cnt[depth];
-                    ui* current_cans = cans[depth];
-
-                    for (ui i = cur_sep; i < current_size; i++) {
-                        if (!visited_v[current_cans[i]]) un_con_cnt[depth]++;
-                    }
-                    // 如果没有可用候选，此分支结束
-                    if (un_con_cnt[depth] == 0) break;
-
-                } else {
-                    // Standard DFS (冲突部分)
+                
+                // 如果最深层级 > 当前深度，说明后续还会用到，是冲突节点
+                if (indep_con_cnt[v] > depth) {
                     if (visited_v[v]) continue;
+                    
                     visited_v[v] = true;
+                    
+                    // 下钻到下一层
+                    depth++;
+                    idx[depth] = 0;
+                    phase[depth] = true;
+                    mpz_set_ui(embedding_level[depth], 0);
+                    pushed = true;
+                    break;
                 }
+            }
+            if (pushed) continue; // 成功下钻，回到 while(true) 开始下一层
 
-                // 进入下一层
+            // --- Phase 1 结束，平滑进入 Phase 2 ---
+            phase[depth] = false;
+            un_con_cnt[depth] = 0;
+            
+            // 统计无冲突节点数量
+            ui cur_size = cans_cnt[depth];
+            const VertexID* cur_cans = cans[depth];
+            for (ui i = 0; i < cur_size; i++) {
+                VertexID v = cur_cans[i];
+                // 如果最深层级 == 当前深度，说明这是最后一次出现，是无冲突节点
+                if (indep_con_cnt[v] == depth && !visited_v[v]) {
+                    un_con_cnt[depth]++;
+                }
+            }
+
+            if (un_con_cnt[depth] > 0) {
+                // 无冲突节点触发优化：无需 mark visited，只需派出一个代表下钻一次
                 depth++;
                 idx[depth] = 0;
-
-                // 默认限制为搜索冲突部分 + 1个触发无冲突计算的入口
-                cnt[depth] = sep_flag[depth] < cans_cnt[depth] ? sep_flag[depth] + 1 : cans_cnt[depth];
-                
+                phase[depth] = true;
                 mpz_set_ui(embedding_level[depth], 0);
-                un_con_cnt[depth] = 0;
+                continue;
             }
+            // 如果连无冲突节点都没有，直接 fall-through 进回溯
         }
-        
+
+    BACKTRACK:
         depth--;
         if (depth == (ui)-1) break;
 
-        // 回溯处理
-        if (idx[depth] > sep_flag[depth]) {
-            // "无冲突块" 的计算逻辑: 当前层的 un_con_cnt * 下一层的方案数
-            mpz_mul_ui(embedding_level[depth+1], embedding_level[depth+1], un_con_cnt[depth]);
-        } else {
-            // "普通 DFS" 的回溯
-            VertexID v = cans[depth][idx[depth]-1];
+        if (phase[depth]) {
+            // 从冲突节点的 DFS 中回溯，恢复 visited 状态
+            VertexID v = cans[depth][idx[depth] - 1];
             visited_v[v] = false;
+            mpz_add(embedding_level[depth], embedding_level[depth], embedding_level[depth+1]);
+        } else {
+            // 从无冲突节点的优化分支中回溯，结果乘以可选数量
+            mpz_mul_ui(embedding_level[depth+1], embedding_level[depth+1], un_con_cnt[depth]);
+            mpz_add(embedding_level[depth], embedding_level[depth], embedding_level[depth+1]);
         }
-
-        // 累加子树结果到当前层
-        mpz_add(embedding_level[depth], embedding_level[depth], embedding_level[depth+1]);
     }
-
-    // 最终结果在 embedding_level[0]
 }
 
 // Select independent set based on Degree (Greedy)

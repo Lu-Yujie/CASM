@@ -7,16 +7,12 @@
 
 class QuickIndep {
     ui* indep_con_cnt;    // Conflict counters for candidates
-    ui* sep_flag;         // Partition markers for candidates (upward/downward conflicts)
     const Graph* query_graph;
     ui *degree;
 
     ui* enum_idx;
-    ui* enum_cnt;
     ui* un_con_cnt;
-
-    std::vector<ui> local_cans_buffer_;
-    std::vector<ui*> local_cans_ptrs_;
+    bool* phase; // true-> Phase 1 (Conflict), false -> Phase 2 (Un-Conflict)
 
 public:
     mpz_t* embedding_level;
@@ -33,8 +29,6 @@ public:
 
     // Main enumeration entry point
     void enumeration(bool*visited_v);
-
-    ui sepDiff(ui* v_cans, const ui *indep_con_cnt, int forward_idx, int backward_idx);
 
     void enum4Parts(bool* visited_v);
 
