@@ -47,8 +47,9 @@ void Aux::init(const Graph* query_graph, ui max_cans) {
     }
 }
 
-template <typename CallbackFunc>
-void Aux::buildAuxInternal(ui current_dnum, CallbackFunc get_neighbors, MemoryManager* mem) {
+void Aux::buildData(const Graph* data_graph, const Graph* query_graph, MemoryManager* mem) {
+    dnum = data_graph->getVerticesCount();
+    
     auto& flag = mem->flag_array;
     auto& updated_flag = mem->reset_buffer;
     auto visited = mem->visited_bitmask;
@@ -85,17 +86,7 @@ void Aux::buildAuxInternal(ui current_dnum, CallbackFunc get_neighbors, MemoryMa
                 VertexID v = cans[u_nbr][j]; // data graph 中的节点 v
                 ui v_nbrs_count = 0;
 
-                const auto& result = get_neighbors(u_nbr, u, v, v_nbrs_count);
-                using ResultType = typename std::decay<decltype(result)>::type;
-
-                const VertexID* v_nbrs_ptr = nullptr;
-                if constexpr (std::is_pointer_v<ResultType>) {
-                    v_nbrs_ptr = result;
-                } else {
-                    v_nbrs_ptr = result.data();
-                    v_nbrs_count = result.size();
-                }
-
+                const VertexID* v_nbrs_ptr = data_graph->getVertexNeighbors(v, v_nbrs_count);
                 if (v_nbrs_ptr == nullptr || v_nbrs_count == 0) continue;
 
                 for (ui k = 0; k < v_nbrs_count; ++k) {
@@ -109,20 +100,4 @@ void Aux::buildAuxInternal(ui current_dnum, CallbackFunc get_neighbors, MemoryMa
         }
         for (auto& v : updated_flag) flag[v] = false;
     }
-}
-
-void Aux::buildData(const Graph* data_graph, const Graph* query_graph, MemoryManager* mem) {
-    dnum = data_graph->getVerticesCount();
-    auto getNeighbors_ptr = [&](VertexID, VertexID, VertexID v, ui& count) {
-        return data_graph->getVertexNeighbors(v, count);
-    };
-    buildAuxInternal(dnum, getNeighbors_ptr, mem);
-}
-
-void Aux::updateData(const Aux& global, MemoryManager* mem) {
-    dnum = global.dnum;
-    auto getNeighbors_vec = [&](VertexID u1, VertexID u2, VertexID v, ui& /*count*/) -> const vector<VertexID>& {
-        return global.getNeighbors(u1, u2, v);
-    };
-    buildAuxInternal(dnum, getNeighbors_vec, mem);
 }

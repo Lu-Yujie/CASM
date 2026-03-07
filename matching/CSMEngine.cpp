@@ -109,15 +109,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
             // ---------------------------
 
             if (build_success) {
-                t_build_start = QueryStats::now();
-                local_index->aux.updateData(global_index->aux, global_index->mem);
-                t_build_end = QueryStats::now();
-                QueryStats::add_duration(stats.time_local_aux_ns, t_build_start, t_build_end);
-
                 mpz_set_ui(one_embedding_cnt, 0);
-
-                // 准备 Adapter
-                QueryAdapter adapter(local_index->aux);
 
                 // --- 统计 Candidates 数量 ---
                 // 假设 candidates_count_ptr 是一个数组，长度为查询图的顶点数
@@ -125,7 +117,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                 size_t q_v_num = global_index->aux.query_graph->getVerticesCount(); 
                 unsigned long long current_cands = 0;
                 for(size_t v_idx = 0; v_idx < q_v_num; ++v_idx) {
-                    current_cands += adapter.candidates_count_ptr[v_idx];
+                    current_cands += local_index->aux.cans[v_idx].size();
                 }
                 stats.total_candidates += current_cands;
                 stats.search_invocations++;
