@@ -9,16 +9,6 @@
 #define HASH_TABLE_RATIO 1.2
 
 /**
- * Define ENABLE_FAILING_SET to enable the failing set pruning set intersection method.
- */
-#define ENABLE_FAILING_SET
-
-/**
- * Define ENABLE_EQUIVALENT_SET to enable the equivalent set pruning set intersection method.
- */
-#define ENABLE_EQUIVALENT_SET
-
-/**
  * Define ANALYZE_DUPLICATE to enable the record the duplicate information
  */
 // #define ANALYZE_DUPLICATE
@@ -31,6 +21,12 @@
     #define UNLIKELY(x) (x)
 #endif
 
+/**
+ * Define PRUNE_THRESHOLD_PERCENT to constrain the pruning propagation condition.
+ */
+#define PRUNE_THRESHOLD_PERCENT 30
+#define SIGNIFICANT_DROP(old_size, new_size) \
+    ((uint64_t)((old_size) - (new_size)) * 100 > (uint64_t)(PRUNE_THRESHOLD_PERCENT) * (old_size))
 
 #define PRINT_SEPARATOR "------------------------------"
 

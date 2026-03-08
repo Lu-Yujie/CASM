@@ -25,7 +25,7 @@ struct MemoryManager {
         bfs_q.init(qnum);
         visited_bitmask = new uint64_t[64];
         all_visited = (qnum == 64) ? ~0ULL : ((1ULL << qnum) - 1);
-        flag_array.resize(dnum, 0);
+        flag_array.resize(dnum, false);
         reset_buffer.reserve(max_cans);
         quick_index = new QuickIndex(dnum, max_cans, query_graph);
     }
