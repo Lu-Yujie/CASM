@@ -2,13 +2,13 @@
 #define LU_MEMORY_MANAGER_H
 
 #include "configuration/types.h"
-#include "utils/fastQueue.h"
+#include "utils/fastMinHeap.h"
 #include "utils/quick/quickIndex.h"
 #include <iostream>
 using namespace std;
 
 struct MemoryManager {
-    FastCircularQueue<ui> bfs_q;
+    FastMinHeap m_heap;
 
     vector<bool> flag_array;
     vector<ui> reset_buffer;
@@ -22,7 +22,7 @@ struct MemoryManager {
             cout << "do not support query with #vertex > 64" << endl;
             exit(-1);
         }
-        bfs_q.init(qnum);
+        m_heap.init(qnum);
         visited_bitmask = new uint64_t[64];
         all_visited = (qnum == 64) ? ~0ULL : ((1ULL << qnum) - 1);
         flag_array.resize(dnum, false);

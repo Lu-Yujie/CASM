@@ -68,7 +68,7 @@ void CSMIndex::ensure_candidate_global(VertexID u, VertexID v_can) {
 }
 
 // --- 辅助函数：在已知行(row_idx)中插入一条边 v_nbr ---
-void CSMIndex::insert_edge_at_index(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
+void CSMIndex::insert_edge(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
     if (edges == nullptr) return;
 
     auto& row = edges->edge_map[v_src]; 
@@ -79,7 +79,7 @@ void CSMIndex::insert_edge_at_index(CSMEdges* edges, VertexID v_src, VertexID v_
 }
 
 // --- 辅助函数：在已知行(row_idx)中删除一条边 v_nbr ---
-void CSMIndex::delete_edge_at_index(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
+void CSMIndex::delete_edge(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
     if (edges == nullptr) return;
 
     auto it = edges->edge_map.find(v_src);
@@ -95,9 +95,7 @@ void CSMIndex::delete_edge_at_index(CSMEdges* edges, VertexID v_src, VertexID v_
 void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
     auto& dnum = aux.dnum;
     auto& all_edges = aux.data;
-    // 记录处理过的点对 {min, max} 防止无向图重复处理
-    set<pair<ui, ui>> processed_pairs;
-    
+
     auto v_src = de.edge_.src();
     auto v_dst = de.edge_.dst();
     char op = de.op_; // '+' or '-'
@@ -105,10 +103,6 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
     for (auto& qe : matched_edges) {
         auto u_src = qe.src();
         auto u_dst = qe.dst();
-
-        pair<ui, ui> key = minmax(u_src, u_dst);
-        if (processed_pairs.count(key)) continue;
-        processed_pairs.insert(key);
 
         if (op == '+') {  // === 插入操作 ===
             if (v_src >= dnum) dnum = v_src + 1;
@@ -121,23 +115,22 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
             // assert(aux.cans[u_dst].size() == aux.data[u_dst][u_src]->edge_.size());
 
             // 2. 插入边
-            insert_edge_at_index(all_edges[u_src][u_dst], v_src, v_dst);
-            insert_edge_at_index(all_edges[u_dst][u_src], v_dst, v_src);
-        } else if (op == '-') {  // === 删除操作 ===
+            insert_edge(all_edges[u_src][u_dst], v_src, v_dst);
+            insert_edge(all_edges[u_dst][u_src], v_dst, v_src);
+        } else {  // === 删除操作 ===
             // 2. 删除边
-            delete_edge_at_index(all_edges[u_src][u_dst], v_src, v_dst);
-            delete_edge_at_index(all_edges[u_dst][u_src], v_dst, v_src);
+            delete_edge(all_edges[u_src][u_dst], v_src, v_dst);
+            delete_edge(all_edges[u_dst][u_src], v_dst, v_src);
         }
     }
 }
 
 // --- 辅助：种子点约束传播 (Seed Propagation) ---
-// 将确定匹配点 (u_fixed -> v_fixed) 的约束传播给 u_fixed 的所有邻居
 bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed, uint64_t& in_queue) {
     auto& query_graph = aux.query_graph;
     auto& local_cans = this->aux.cans;
     auto& visited = mem->visited_bitmask[0];
-    auto& bfs_q = mem->bfs_q;
+    auto& m_heap = mem->m_heap;
 
     ui unbr_cnt = 0;
     const VertexID* unbrs = query_graph->getVertexNeighbors(u_fixed, unbr_cnt);
@@ -148,22 +141,20 @@ bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed,
         const vector<VertexID>& valid_candidates = global->aux.getNeighbors(u_fixed, unbr, v_fixed);
         if (valid_candidates.empty()) return false;
 
-        if (!get_bit(visited, unbr)) {  
-            local_cans[unbr] = valid_candidates; 
+        if (!get_bit(visited, unbr)) {
+            local_cans[unbr] = valid_candidates;
             set_bit(visited, unbr);
-
-            // 标记入队
             set_bit(in_queue, unbr);
-            bfs_q.push(unbr);
-        } else {  
+            m_heap.push(unbr, local_cans[unbr].size());
+        } else {
             ui old_size = local_cans[unbr].size();
             SetOp::intersectAndUpdate(local_cans[unbr], valid_candidates);
             if (local_cans[unbr].empty()) return false;
 
-            // 当被砍掉的候选点比例达到阈值，且不在队列中时，重新入队
+            // 应用阈值：只有缩小显著，才重新入队
             if (SIGNIFICANT_DROP(old_size, local_cans[unbr].size()) && !get_bit(in_queue, unbr)) {
                 set_bit(in_queue, unbr);
-                bfs_q.push(unbr);
+                m_heap.push(unbr, local_cans[unbr].size());
             }
         }
     }
@@ -186,7 +177,7 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
     for (VertexID u_can : u_current_cans) {
         const vector<VertexID>& valid_neighbors = global->aux.getNeighbors(u, unbr, u_can);
         for (VertexID v_nbr : valid_neighbors) {
-            if (UNLIKELY(flag_array[v_nbr] == false)) {  // 去重
+            if (flag_array[v_nbr] == false) {  // 去重
                 flag_array[v_nbr] = true;
                 reset_buffer.push_back(v_nbr); 
             }
@@ -223,36 +214,38 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
 
 // --- 构建局部索引主流程 ---
 bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
+    auto q_src = qe.src();
+    auto q_dst = qe.dst();
+    auto v_src = de.src();
+    auto v_dst = de.dst();
+
     auto& qnum = aux.qnum;
     const auto& all_visited = mem->all_visited;
     auto& local_cans = this->aux.cans;
     auto& flag_array = mem->flag_array;
     auto& dnum = global->aux.dnum;
     auto& visited = mem->visited_bitmask[0];
+    
     uint64_t in_queue = 0; 
     visited = 0;
-    auto& bfs_q = mem->bfs_q;
-    bfs_q.clear();
+    auto& m_heap = mem->m_heap;
+    m_heap.clear();
 
-    auto q_src = qe.src();
-    auto q_dst = qe.dst();
     local_cans[q_src].clear();
-    local_cans[q_src].emplace_back(de.src());
+    local_cans[q_src].emplace_back(v_src);
     set_bit(visited, q_src);
+    
     local_cans[q_dst].clear();
-    local_cans[q_dst].emplace_back(de.dst());
+    local_cans[q_dst].emplace_back(v_dst);
     set_bit(visited, q_dst);
 
     // 快速剪枝
-    if (!propagate_neighbor_constraint(global, q_src, de.src(), in_queue)) return false;
-    if (!propagate_neighbor_constraint(global, q_dst, de.dst(), in_queue)) return false;
-
-    if (flag_array.size() < dnum) flag_array.resize(dnum, false);
+    if (!propagate_neighbor_constraint(global, q_src, v_src, in_queue)) return false;
+    if (!propagate_neighbor_constraint(global, q_dst, v_dst, in_queue)) return false;
 
     // 传播剪枝
-    while (!bfs_q.empty()) {
-        ui u = bfs_q.front();
-        bfs_q.pop();
+    while (!m_heap.empty()) {
+        ui u = m_heap.pop();
         clear_bit(in_queue, u);
 
         if (local_cans[u].empty()) return false;
@@ -269,14 +262,13 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
             // 执行传播
             if (!propagate_forward(global, u, unbr)) return false;
 
-            // 如果未访问过，或者访问过但候选集被砍小了，入队
+            // 应用自适应阈值
             if (!was_visited || SIGNIFICANT_DROP(old_size, local_cans[unbr].size())) {
                 if (!was_visited) set_bit(visited, unbr);
-
-                // 确保不会重复入队
+                
                 if (!get_bit(in_queue, unbr)) {
                     set_bit(in_queue, unbr);
-                    bfs_q.push(unbr);
+                    m_heap.push(unbr, local_cans[unbr].size());
                 }
             }
         }
