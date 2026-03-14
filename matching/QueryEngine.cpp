@@ -11,8 +11,8 @@
 void
 QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_num,
                          mpz_t embedding_cnt, int64_t& time_limit) {
-    auto& query_graph = global->aux.query_graph;
-    auto& qnum = global->aux.qnum;
+    auto& query_graph = global->mem->q_graph;
+    auto& qnum = global->mem->q_num;
 
     auto& quick_index = *(global->mem->quick_index);
     auto& valid_cans = quick_index.valid_cans;
@@ -29,7 +29,7 @@ QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_
     auto& cover_num = indep_info.cover_num;
     auto& indep_embeddings = indep_info.embedding_level[0];
 
-    auto& local_cans = local->aux.cans;
+    auto& local_cans = local->cans;
     for (ui i = 0; i < qnum; i++) {
         valid_cans[i].importRootCandidates(local_cans[i].data(), local_cans[i].size());
     }
@@ -91,8 +91,8 @@ QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_
 
 ui
 QueryEngine::quickRefine(CSMIndex* global, VertexID u, VertexID v) {
-    auto& qnum = global->aux.qnum;
-    auto& query_graph = global->aux.query_graph;
+    auto& qnum = global->mem->q_num;
+    auto& query_graph = global->mem->q_graph;
     auto& quick_index = *(global->mem->quick_index);
     auto& valid_cans = quick_index.valid_cans;
     auto& visited_u = quick_index.visited_u;

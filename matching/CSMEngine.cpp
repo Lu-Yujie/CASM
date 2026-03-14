@@ -68,8 +68,8 @@ void CSMEngine::build_edges_mapping(const Graph *query_graph) {
 void CSMEngine::init(const Graph *data_graph, const Graph *query_graph) {
     global_index = new CSMIndex;
     local_index = new CSMIndex;
-    global_index->build_Aux(data_graph, query_graph);
-    local_index->aux.init(query_graph, data_graph->getGraphMaxLabelFrequency());
+    global_index->init_global(query_graph, data_graph);
+    local_index->init_local(query_graph, data_graph);
     build_automorphism_edges(query_graph);
     build_edges_mapping(query_graph);
 }
@@ -114,10 +114,10 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                 // --- 统计 Candidates 数量 ---
                 // 假设 candidates_count_ptr 是一个数组，长度为查询图的顶点数
                 // 如果您有特定的获取顶点数的方法，请在此处替换 global_index->aux.query_graph->getVerticesCount()
-                size_t q_v_num = global_index->aux.query_graph->getVerticesCount(); 
+                size_t q_v_num = global_index->mem->q_graph->getVerticesCount(); 
                 unsigned long long current_cands = 0;
                 for(size_t v_idx = 0; v_idx < q_v_num; ++v_idx) {
-                    current_cands += local_index->aux.cans[v_idx].size();
+                    current_cands += local_index->cans[v_idx].size();
                 }
                 stats.total_candidates += current_cands;
                 stats.search_invocations++;

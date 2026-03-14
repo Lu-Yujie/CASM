@@ -6,15 +6,12 @@
 
 struct Aux {
     CSMEdges*** data = nullptr;
-    vector<vector<VertexID>> cans;
     vector<VertexID> empty;
-    const Graph* query_graph = nullptr;
-    ui dnum, qnum;
+    ui q_num;
 
     Aux() {}
     ~Aux();
-    void init(const Graph* query_graph, ui max_cans);
-    void buildData(const Graph* data_graph, const Graph* query_graph, MemoryManager* mem);
+    void buildData(const Graph* query_graph, const Graph* data_graph, uint64_t* visited);
     const vector<VertexID>& getNeighbors(VertexID u_1, VertexID u_2, VertexID v) const;
 };
 

@@ -6,65 +6,23 @@
 using namespace std;
 
 MemoryManager* CSMIndex::mem = nullptr;
-// 只选择符合要求的边，然后构建辅助数据结构。以边为主要过滤条件，且不做传播剪枝
-void CSMIndex::build_Aux(const Graph *data_graph, const Graph *query_graph) {
-// 首先构建每个点的candidates，然后构建边
-// 之后可以做优化，直接识别所有查询边可以匹配的数据边，然后获取每个查询点的带有重复的 cans, 然后对每个点的candidates做重排序。
-// 或者可以直接按照边来做查询。
-    auto& dnum = aux.dnum;
-    auto& qnum = aux.qnum;
-    auto& cans = aux.cans;
-    dnum = data_graph->getVerticesCount();
-    qnum = query_graph->getVerticesCount();
+
+void CSMIndex::init_local(const Graph *query_graph, const Graph *data_graph) {
+    auto q_num = query_graph->getVerticesCount();
     auto max_cans = data_graph->getGraphMaxLabelFrequency();
-    mem = new MemoryManager(max_cans, qnum, dnum, query_graph);
-    aux.init(query_graph, max_cans);
-
-    // 构建 cans
-    ui unbrs_cnt = 0;
-    ui vlabel_vs_cnt = 0;
-    ui vnbrs_cnt = 0;
-    auto label_cnt = data_graph->getLabelsCount();
-    vector<ui> unbrs_labels, vnbrs_labels;
-    unbrs_labels.reserve(label_cnt), vnbrs_labels.reserve(label_cnt);
-    for (VertexID u = 0; u < qnum; u++) {
-        auto ulabel = query_graph->getVertexLabel(u);
-        auto vlabel_vs = data_graph->getVerticesByLabel(ulabel, vlabel_vs_cnt);
-        auto unbrs = query_graph->getVertexNeighbors(u, unbrs_cnt);
-        unbrs_labels.clear();
-        for (ui i = 0; i < unbrs_cnt; i++) {
-            auto& unbr = unbrs[i];
-            auto unbr_label = query_graph->getVertexLabel(unbr);
-            unbrs_labels.emplace_back(unbr_label);
-        }
-        sort(unbrs_labels.begin(), unbrs_labels.end());
-        for (ui v_idx = 0; v_idx < vlabel_vs_cnt; v_idx++) {
-            auto& v = vlabel_vs[v_idx];
-            auto vnbrs = data_graph->getVertexNeighbors(v, vnbrs_cnt);
-            vnbrs_labels.clear();
-            for (ui i = 0; i < vnbrs_cnt; i++) {
-                auto& vnbr = vnbrs[i];
-                auto vnbr_label = data_graph->getVertexLabel(vnbr);
-                vnbrs_labels.emplace_back(vnbr_label);
-            }
-            sort(vnbrs_labels.begin(), vnbrs_labels.end());
-            if (SetOp::haveOverlapTwo(unbrs_labels, vnbrs_labels)) cans[u].emplace_back(v);
-        }
+    cans.resize(q_num);
+    for (ui u = 0; u < q_num; u++) {
+        cans[u].reserve(max_cans);
     }
-
-    for (ui i = 0; i < qnum; ++i) sort(cans[i].begin(), cans[i].end());
-    aux.buildData(data_graph, query_graph, mem);
 }
 
-// --- 核心逻辑：确保候选点存在 ---
-void CSMIndex::ensure_candidate_global(VertexID u, VertexID v_can) {
-    auto& u_cans = aux.cans[u];
+void CSMIndex::init_global(const Graph *query_graph, const Graph *data_graph) {
+    auto q_num = query_graph->getVerticesCount();
+    auto d_num = data_graph->getVerticesCount();
+    auto max_cans = data_graph->getGraphMaxLabelFrequency();
 
-    ui idx = b_search::lower_bound_idx(u_cans, v_can);
-    if (idx < u_cans.size() && u_cans[idx] == v_can) {
-        return; // 已存在
-    }
-    u_cans.insert(u_cans.begin() + idx, v_can);
+    mem = new MemoryManager(max_cans, query_graph, data_graph);
+    aux.buildData(query_graph, data_graph, mem->visited_bitmask);
 }
 
 // --- 辅助函数：在已知行(row_idx)中插入一条边 v_nbr ---
@@ -93,7 +51,7 @@ void CSMIndex::delete_edge(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
 }
 
 void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
-    auto& dnum = aux.dnum;
+    auto& d_num = mem->d_num;
     auto& all_edges = aux.data;
 
     auto v_src = de.edge_.src();
@@ -105,20 +63,12 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
         auto u_dst = qe.dst();
 
         if (op == '+') {  // === 插入操作 ===
-            if (v_src >= dnum) dnum = v_src + 1;
-            if (v_dst >= dnum) dnum = v_dst + 1;
+            if (v_src >= d_num) d_num = v_src + 1;
+            if (v_dst >= d_num) d_num = v_dst + 1;
 
-            // 1. 确保候选点存在 (会触发全局同步)
-            ensure_candidate_global(u_src, v_src);
-            ensure_candidate_global(u_dst, v_dst);
-            // assert(aux.cans[u_src].size() == aux.data[u_src][u_dst]->edge_.size());
-            // assert(aux.cans[u_dst].size() == aux.data[u_dst][u_src]->edge_.size());
-
-            // 2. 插入边
             insert_edge(all_edges[u_src][u_dst], v_src, v_dst);
             insert_edge(all_edges[u_dst][u_src], v_dst, v_src);
         } else {  // === 删除操作 ===
-            // 2. 删除边
             delete_edge(all_edges[u_src][u_dst], v_src, v_dst);
             delete_edge(all_edges[u_dst][u_src], v_dst, v_src);
         }
@@ -127,8 +77,8 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
 
 // --- 辅助：种子点约束传播 (Seed Propagation) ---
 bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed, uint64_t& in_queue) {
-    auto& query_graph = aux.query_graph;
-    auto& local_cans = this->aux.cans;
+    auto& query_graph = mem->q_graph;
+    auto& local_cans = this->cans;
     auto& visited = mem->visited_bitmask[0];
     auto& m_heap = mem->m_heap;
 
@@ -163,10 +113,10 @@ bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed,
 
 // --- 通用前向传播 (BFS Step) ---
 bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
-    auto& local_cans = this->aux.cans;
+    auto& local_cans = this->cans;
     auto& flag_array = mem->flag_array;
     auto& reset_buffer = mem->reset_buffer;
-    auto& dnum = global->aux.dnum;
+    auto& d_num = global->mem->d_num;
     auto& visited = mem->visited_bitmask[0];
 
     // 1. 清理 buffer
@@ -219,11 +169,11 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
     auto v_src = de.src();
     auto v_dst = de.dst();
 
-    auto& qnum = aux.qnum;
+    auto& q_num = aux.q_num;
     const auto& all_visited = mem->all_visited;
-    auto& local_cans = this->aux.cans;
+    auto& local_cans = this->cans;
     auto& flag_array = mem->flag_array;
-    auto& dnum = global->aux.dnum;
+    auto& d_num = global->mem->d_num;
     auto& visited = mem->visited_bitmask[0];
     
     uint64_t in_queue = 0; 
@@ -251,7 +201,7 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
         if (local_cans[u].empty()) return false;
 
         ui unbr_cnt = 0;
-        const VertexID* unbrs = aux.query_graph->getVertexNeighbors(u, unbr_cnt);
+        const VertexID* unbrs = mem->q_graph->getVertexNeighbors(u, unbr_cnt);
 
         for (ui i = 0; i < unbr_cnt; ++i) {
             ui unbr = unbrs[i];
@@ -276,11 +226,14 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
 
     // 孤立点检查
     if (LIKELY(visited == all_visited)) return true;
-    for (ui i = 0; i < qnum; ++i) {
+    for (ui i = 0; i < q_num; ++i) {
+        auto u_label = mem->q_graph->getVertexLabel(i);
+        ui vlabel_vs_cnt = 0;
+        auto vlabel_vs = mem->d_graph->getVerticesByLabel(u_label, vlabel_vs_cnt);
+        if (vlabel_vs_cnt == 0) return false;
         if (!get_bit(visited, i)) {
-            local_cans[i] = global->aux.cans[i];
+            local_cans[i].assign(vlabel_vs, vlabel_vs+vlabel_vs_cnt);
         }
-        if (local_cans[i].empty()) return false;
     }
 
     return true;
