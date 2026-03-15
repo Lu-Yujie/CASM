@@ -9,12 +9,12 @@
 #include <timeOp.h>
 
 void
-QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_num,
+QueryEngine::QuickEngine(CSMIndex* csm_index, size_t output_limit_num,
                          mpz_t embedding_cnt, int64_t& time_limit) {
-    auto& query_graph = global->mem->q_graph;
-    auto& qnum = global->mem->q_num;
+    auto& query_graph = csm_index->mem->q_graph;
+    auto& qnum = csm_index->mem->q_num;
 
-    auto& quick_index = *(global->mem->quick_index);
+    auto& quick_index = *(csm_index->mem->quick_index);
     auto& valid_cans = quick_index.valid_cans;
     auto& valid_idx = quick_index.valid_idx;
     auto& visited_u = quick_index.visited_u;
@@ -29,7 +29,7 @@ QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_
     auto& cover_num = indep_info.cover_num;
     auto& indep_embeddings = indep_info.embedding_level[0];
 
-    auto& local_cans = local->cans;
+    auto& local_cans = csm_index->cans;
     for (ui i = 0; i < qnum; i++) {
         valid_cans[i].importRootCandidates(local_cans[i].data(), local_cans[i].size());
     }
@@ -48,7 +48,7 @@ QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_
             valid_idx[u]++;
             if (visited_v[v]) continue;
 
-            VertexID failed_u = quickRefine(global, u, v);
+            VertexID failed_u = quickRefine(csm_index, u, v);
             if (failed_u != (ui)-1) {  // no valid cans for next depth
                 // cout << "u: " << u << ", failed_u: " << failed_u << ", fail" << endl;
                 continue;
@@ -63,7 +63,7 @@ QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_
                 // gmp_printf("new result: %Zd\n", level_embeddings);
                 mpz_add(embedding_cnt, embedding_cnt, indep_embeddings);
                 // next batch
-                quickDeRefine(global, u);
+                quickDeRefine(csm_index, u);
                 visited_v[v] = false;
             } else {
                 cur_depth++;
@@ -82,7 +82,7 @@ QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_
         visited_u[last_u] = false;
         visited_v[u2v[cur_u]] = false;
 
-        quickDeRefine(global, cur_u);
+        quickDeRefine(csm_index, cur_u);
     }
 
     // Release the buffer.
@@ -90,10 +90,10 @@ QueryEngine::QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_
 }
 
 ui
-QueryEngine::quickRefine(CSMIndex* global, VertexID u, VertexID v) {
-    auto& qnum = global->mem->q_num;
-    auto& query_graph = global->mem->q_graph;
-    auto& quick_index = *(global->mem->quick_index);
+QueryEngine::quickRefine(CSMIndex* csm_index, VertexID u, VertexID v) {
+    auto& qnum = csm_index->mem->q_num;
+    auto& query_graph = csm_index->mem->q_graph;
+    auto& quick_index = *(csm_index->mem->quick_index);
     auto& valid_cans = quick_index.valid_cans;
     auto& visited_u = quick_index.visited_u;
     auto& visited_v = quick_index.visited_v;
@@ -107,7 +107,7 @@ QueryEngine::quickRefine(CSMIndex* global, VertexID u, VertexID v) {
         auto& unbr = unbrs[i];
         if (visited_u[unbr]) continue;
         // old valid_cans of unbr
-        auto& vnbrs = global->aux.getNeighbors(u, unbr, v);
+        auto& vnbrs = csm_index->aux.getNeighbors(u, unbr, v);
         auto u_cans = valid_cans[unbr].cur_cans();
         auto u_cans_cnt = valid_cans[unbr].cur_cans_cnt();
         auto u_nxt_cans = valid_cans[unbr].next_buffer();
@@ -133,8 +133,8 @@ QueryEngine::quickRefine(CSMIndex* global, VertexID u, VertexID v) {
  * process oneCansV from refinement
 */
 void
-QueryEngine::quickDeRefine(CSMIndex* global, VertexID u) {
-    auto& quick_index = *(global->mem->quick_index);
+QueryEngine::quickDeRefine(CSMIndex* csm_index, VertexID u) {
+    auto& quick_index = *(csm_index->mem->quick_index);
     auto& valid_cans = quick_index.valid_cans;
     auto& influenced = quick_index.influenced_u[u];
     auto& influenced_cnt = quick_index.influenced_u_cnt[u];

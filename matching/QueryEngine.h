@@ -12,7 +12,7 @@
 class QueryEngine {
 public:
     static void
-    QuickEngine(CSMIndex* global, CSMIndex* local, size_t output_limit_num,
+    QuickEngine(CSMIndex* csm_index, size_t output_limit_num,
                 mpz_t embedding_cnt, int64_t& time_limit);
 
     static void
@@ -23,8 +23,9 @@ public:
 private:
     static void quickEnum(QuickIndex& index);
 
-    static ui quickRefine(CSMIndex* global, VertexID u, VertexID v);
-    static void quickDeRefine(CSMIndex* global, VertexID u);
+    static ui quickRefine(CSMIndex* csm_index, VertexID u, VertexID v);
+
+    static void quickDeRefine(CSMIndex* csm_index, VertexID u);
 
     static void bsxMaxCoverOrder(const Graph *graph, ui*& order, ui& num_cover, ui *candidates_count);
 

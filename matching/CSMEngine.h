@@ -58,16 +58,14 @@ struct QueryStats {
 // 更新的数据边可以匹配到多个查询边上，
 class CSMEngine {
 private:
-    CSMIndex* global_index;
-    CSMIndex* local_index;
+    CSMIndex* csm_index;
     vector<vector<Edge>> automorphism_edges_;
     unordered_map<ELabel, vector<Edge>> label_edge_mapping_;
     unordered_map<ELabel, vector<uint32_t>> label_automorphism_mapping_;
 public:
-    CSMEngine(): global_index(nullptr), local_index(nullptr), label_edge_mapping_({}), label_automorphism_mapping_({}) {}
+    CSMEngine(): csm_index(nullptr), label_edge_mapping_({}), label_automorphism_mapping_({}) {}
     ~CSMEngine() {
-        delete global_index;
-        delete local_index;
+        delete csm_index;
     }
     void init(const Graph *data_graph, const Graph *query_graph);
     void query(Update de, size_t output_limit, mpz_t embedding_cnt, int64_t& end_time, QueryStats& stats);

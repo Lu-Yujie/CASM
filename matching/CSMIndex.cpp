@@ -5,22 +5,14 @@
 #include "assert.h"
 using namespace std;
 
-MemoryManager* CSMIndex::mem = nullptr;
-
-void CSMIndex::init_local(const Graph *query_graph, const Graph *data_graph) {
+void CSMIndex::init(const Graph *query_graph, const Graph *data_graph) {
     auto q_num = query_graph->getVerticesCount();
+    auto d_num = data_graph->getVerticesCount();
     auto max_cans = data_graph->getGraphMaxLabelFrequency();
     cans.resize(q_num);
     for (ui u = 0; u < q_num; u++) {
         cans[u].reserve(max_cans);
     }
-}
-
-void CSMIndex::init_global(const Graph *query_graph, const Graph *data_graph) {
-    auto q_num = query_graph->getVerticesCount();
-    auto d_num = data_graph->getVerticesCount();
-    auto max_cans = data_graph->getGraphMaxLabelFrequency();
-
     mem = new MemoryManager(max_cans, query_graph, data_graph);
     aux.buildData(query_graph, data_graph, mem->visited_bitmask);
 }
@@ -76,7 +68,7 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
 }
 
 // --- 辅助：种子点约束传播 (Seed Propagation) ---
-bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed, VertexID v_fixed, uint64_t& in_queue) {
+bool CSMIndex::propagate_neighbor_constraint(ui u_fixed, VertexID v_fixed, uint64_t& in_queue) {
     auto& query_graph = mem->q_graph;
     auto& local_cans = this->cans;
     auto& visited = mem->visited_bitmask[0];
@@ -88,7 +80,7 @@ bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed,
     for (ui i = 0; i < unbr_cnt; ++i) {
         ui unbr = unbrs[i];
 
-        const vector<VertexID>& valid_candidates = global->aux.getNeighbors(u_fixed, unbr, v_fixed);
+        const vector<VertexID>& valid_candidates = aux.getNeighbors(u_fixed, unbr, v_fixed);
         if (valid_candidates.empty()) return false;
 
         if (!get_bit(visited, unbr)) {
@@ -112,11 +104,11 @@ bool CSMIndex::propagate_neighbor_constraint(const CSMIndex* global, ui u_fixed,
 }
 
 // --- 通用前向传播 (BFS Step) ---
-bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
+bool CSMIndex::propagate_forward(ui u, ui unbr) {
     auto& local_cans = this->cans;
     auto& flag_array = mem->flag_array;
     auto& reset_buffer = mem->reset_buffer;
-    auto& d_num = global->mem->d_num;
+    auto& d_num = mem->d_num;
     auto& visited = mem->visited_bitmask[0];
 
     // 1. 清理 buffer
@@ -125,7 +117,7 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
     // 2. Push & Deduplicate
     const auto& u_current_cans = local_cans[u];
     for (VertexID u_can : u_current_cans) {
-        const vector<VertexID>& valid_neighbors = global->aux.getNeighbors(u, unbr, u_can);
+        const vector<VertexID>& valid_neighbors = aux.getNeighbors(u, unbr, u_can);
         for (VertexID v_nbr : valid_neighbors) {
             if (flag_array[v_nbr] == false) {  // 去重
                 flag_array[v_nbr] = true;
@@ -163,7 +155,7 @@ bool CSMIndex::propagate_forward(const CSMIndex* global, ui u, ui unbr) {
 }
 
 // --- 构建局部索引主流程 ---
-bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
+bool CSMIndex::try_build_local(Edge de, Edge qe) {
     auto q_src = qe.src();
     auto q_dst = qe.dst();
     auto v_src = de.src();
@@ -173,7 +165,7 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
     const auto& all_visited = mem->all_visited;
     auto& local_cans = this->cans;
     auto& flag_array = mem->flag_array;
-    auto& d_num = global->mem->d_num;
+    auto& d_num = mem->d_num;
     auto& visited = mem->visited_bitmask[0];
     
     uint64_t in_queue = 0; 
@@ -190,8 +182,8 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
     set_bit(visited, q_dst);
 
     // 快速剪枝
-    if (!propagate_neighbor_constraint(global, q_src, v_src, in_queue)) return false;
-    if (!propagate_neighbor_constraint(global, q_dst, v_dst, in_queue)) return false;
+    if (!propagate_neighbor_constraint(q_src, v_src, in_queue)) return false;
+    if (!propagate_neighbor_constraint(q_dst, v_dst, in_queue)) return false;
 
     // 传播剪枝
     while (!m_heap.empty()) {
@@ -210,7 +202,7 @@ bool CSMIndex::try_build_local(const CSMIndex* global, Edge de, Edge qe) {
             ui old_size = was_visited ? local_cans[unbr].size() : 0;
 
             // 执行传播
-            if (!propagate_forward(global, u, unbr)) return false;
+            if (!propagate_forward(u, unbr)) return false;
 
             // 应用自适应阈值
             if (!was_visited || SIGNIFICANT_DROP(old_size, local_cans[unbr].size())) {

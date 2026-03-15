@@ -66,10 +66,8 @@ void CSMEngine::build_edges_mapping(const Graph *query_graph) {
 
 // 构建 global CSMIndex, 构建 automorphism information
 void CSMEngine::init(const Graph *data_graph, const Graph *query_graph) {
-    global_index = new CSMIndex;
-    local_index = new CSMIndex;
-    global_index->init_global(query_graph, data_graph);
-    local_index->init_local(query_graph, data_graph);
+    csm_index = new CSMIndex;
+    csm_index->init(query_graph, data_graph);
     build_automorphism_edges(query_graph);
     build_edges_mapping(query_graph);
 }
@@ -89,7 +87,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
     // 2. 第二步：如果是插入操作 (+)，必须先更新 Global Index
     if (de.op_ == '+') {
         auto t_start = QueryStats::now(); // [TIMER START]
-        global_index->update_Aux(de, matched_edges);
+        csm_index->update_Aux(de, matched_edges);
         auto t_end = QueryStats::now();   // [TIMER END]
         QueryStats::add_duration(stats.time_update_aux_ns, t_start, t_end);
     }
@@ -103,7 +101,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
         if (edge_group[0].elabel_ == de.edge_.elabel_) {
             // --- 统计 try_build_local ---
             auto t_build_start = QueryStats::now();
-            bool build_success = local_index->try_build_local(global_index, de.edge_, edge_group[0]);
+            bool build_success = csm_index->try_build_local(de.edge_, edge_group[0]);
             auto t_build_end = QueryStats::now();
             QueryStats::add_duration(stats.time_try_build_ns, t_build_start, t_build_end);
             // ---------------------------
@@ -114,10 +112,10 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                 // --- 统计 Candidates 数量 ---
                 // 假设 candidates_count_ptr 是一个数组，长度为查询图的顶点数
                 // 如果您有特定的获取顶点数的方法，请在此处替换 global_index->aux.query_graph->getVerticesCount()
-                size_t q_v_num = global_index->mem->q_graph->getVerticesCount(); 
+                size_t q_v_num = csm_index->mem->q_graph->getVerticesCount(); 
                 unsigned long long current_cands = 0;
                 for(size_t v_idx = 0; v_idx < q_v_num; ++v_idx) {
-                    current_cands += local_index->cans[v_idx].size();
+                    current_cands += csm_index->cans[v_idx].size();
                 }
                 stats.total_candidates += current_cands;
                 stats.search_invocations++;
@@ -134,8 +132,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                 //                        adapter.candidates_count_ptr,
                 //                        global_index->mem->order,
                 //                        output_limit, one_embedding_cnt, end_time);
-                QueryEngine::QuickEngine(global_index, local_index,
-                                       output_limit, one_embedding_cnt, end_time);
+                QueryEngine::QuickEngine(csm_index, output_limit, one_embedding_cnt, end_time);
                 auto t_bsx_end = QueryStats::now();
                 QueryStats::add_duration(stats.time_bsx_ns, t_bsx_start, t_bsx_end);
                 // ---------------------
@@ -157,7 +154,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
     // 4. 第四步：如果是删除操作 (-)，更新 Global Index
     if (de.op_ == '-') {
         auto t_start = QueryStats::now(); // [TIMER START]
-        global_index->update_Aux(de, matched_edges);
+        csm_index->update_Aux(de, matched_edges);
         auto t_end = QueryStats::now();   // [TIMER END]
         QueryStats::add_duration(stats.time_update_aux_ns, t_start, t_end);
     }
