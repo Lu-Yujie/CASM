@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
     std::cout << "Enumerate time (seconds): " << NANOSECTOSEC(enumeration_time_in_ns) << std::endl;
     std::cout << "Total time (seconds): " << NANOSECTOSEC(total_time_in_ns) << std::endl;
     std::cout << "processed edges: " << processed_edges_cnt << "/" << update_cnt << std::endl;
-    gmp_printf("#Total Embeddings: %Zd, ", total_embeddings);
+    gmp_printf("#Total Embeddings: %Zd ", total_embeddings);
     std::cout << "\nEnd." << std::endl;
 
     /**

@@ -32,7 +32,7 @@ def check_correctness(binary_path, data_graph_path, data_graph_update_path, quer
 
     for query_graph_path in query_graph_path_list:
         execution_args = generate_args(binary_path, '-d', data_graph_path, '-q', query_graph_path,
-                                       '-u', data_graph_update_path, '-num', 'MAX')
+                                       '-u', data_graph_update_path, '-n', 'MAX')
 
         (rc, std_output, std_error) = execute_binary(execution_args)
         query_graph_name = os.path.splitext(os.path.basename(query_graph_path))[0]
