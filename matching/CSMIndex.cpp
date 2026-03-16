@@ -15,6 +15,7 @@ void CSMIndex::init(const Graph *query_graph, const Graph *data_graph) {
     }
     mem = new MemoryManager(max_cans, query_graph, data_graph);
     aux.buildData(query_graph, data_graph, mem->visited_bitmask);
+    csm_filter.init(data_graph);
 }
 
 // --- 辅助函数：在已知行(row_idx)中插入一条边 v_nbr ---
@@ -50,6 +51,9 @@ void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
     auto v_dst = de.edge_.dst();
     char op = de.op_; // '+' or '-'
 
+    // update filter
+    csm_filter.update_filter(v_src, v_dst, op);
+
     for (auto& qe : matched_edges) {
         auto u_src = qe.src();
         auto u_dst = qe.dst();
@@ -84,10 +88,22 @@ bool CSMIndex::propagate_neighbor_constraint(ui u_fixed, VertexID v_fixed, uint6
         if (valid_candidates.empty()) return false;
 
         if (!get_bit(visited, unbr)) {
-            local_cans[unbr] = valid_candidates;
+            ui unbr_q_deg = query_graph->getVertexDegree(unbr);
+            auto& target_cans = local_cans[unbr];
+
+            target_cans.clear();
+
+            for (VertexID v : valid_candidates) {
+                if (csm_filter.filter_check(v, unbr_q_deg)) {
+                    target_cans.push_back(v);
+                }
+            }
+
+            if (target_cans.empty()) return false;
+
             set_bit(visited, unbr);
             set_bit(in_queue, unbr);
-            m_heap.push(unbr, local_cans[unbr].size());
+            m_heap.push(unbr, target_cans.size());
         } else {
             ui old_size = local_cans[unbr].size();
             SetOp::intersectAndUpdate(local_cans[unbr], valid_candidates);
@@ -132,8 +148,22 @@ bool CSMIndex::propagate_forward(ui u, ui unbr) {
 
     // 3. Update Local Candidates
     if (!get_bit(visited, unbr)) {  // unbr 未访问, 将 reset_buffer 作为新的候选集
+        ui unbr_q_deg = mem->q_graph->getVertexDegree(unbr);
+        ui write_idx = 0;
+
+        // reset flag_array & complete filter_check
+        for (VertexID v : reset_buffer) {
+            flag_array[v] = false;
+
+            if (csm_filter.filter_check(v, unbr_q_deg)) {
+                reset_buffer[write_idx++] = v;
+            }
+        }
+        
+        reset_buffer.resize(write_idx);
+        if (reset_buffer.empty()) return false;
+
         std::sort(reset_buffer.begin(), reset_buffer.end());
-        for (VertexID v : reset_buffer) flag_array[v] = false;  // clear buffer before swap
         local_cans[unbr].swap(reset_buffer);
     } else {  // unbr 已访问, 过滤现有的 local_cans[unbr]，只保留 flag 为 1 的元素
         auto& target = local_cans[unbr];
