@@ -1,5 +1,5 @@
-#ifndef SUBGRAPHMATCHING_GRAPHOPERATIONS_H
-#define SUBGRAPHMATCHING_GRAPHOPERATIONS_H
+#ifndef CSM_GRAPHOPERATIONS_H
+#define CSM_GRAPHOPERATIONS_H
 
 #include "graph/graph.h"
 class GraphOperations {
@@ -8,4 +8,4 @@ public:
 };
 
 
-#endif //SUBGRAPHMATCHING_GRAPHOPERATIONS_H
+#endif //CSM_GRAPHOPERATIONS_H

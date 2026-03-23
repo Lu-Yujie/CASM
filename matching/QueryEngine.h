@@ -1,5 +1,5 @@
-#ifndef SUBGRAPHMATCHING_QUERY_ENGINE_H
-#define SUBGRAPHMATCHING_QUERY_ENGINE_H
+#ifndef CSM_QUERY_ENGINE_H
+#define CSM_QUERY_ENGINE_H
 
 #include "utils/bsx/bsx.h"
 #include "CSMIndex.h"
@@ -52,4 +52,4 @@ private:
 };
 
 
-#endif //SUBGRAPHMATCHING_QUERY_ENGINE_H
+#endif //CSM_QUERY_ENGINE_H

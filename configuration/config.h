@@ -1,5 +1,5 @@
-#ifndef SUBGRAPHMATCHING_CONFIG_H
-#define SUBGRAPHMATCHING_CONFIG_H
+#ifndef CSM_CONFIG_H
+#define CSM_CONFIG_H
 
 
 /**
@@ -30,4 +30,4 @@
 
 #define PRINT_SEPARATOR "------------------------------"
 
-#endif //SUBGRAPHMATCHING_CONFIG_H
+#endif //CSM_CONFIG_H

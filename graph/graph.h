@@ -1,5 +1,5 @@
-#ifndef SUBGRAPHMATCHING_GRAPH_H
-#define SUBGRAPHMATCHING_GRAPH_H
+#ifndef CSM_GRAPH_H
+#define CSM_GRAPH_H
 
 #include <unordered_map>
 #include <iostream>
@@ -8,10 +8,8 @@
 #include "configuration/types.h"
 #include "configuration/config.h"
 
-/**
- * A graph is stored as the CSR format.
- */
 using spp::sparse_hash_map;
+
 class Graph {
 public:
     std::string g_name;
@@ -32,13 +30,16 @@ private:
 
     ui* vlabels_offsets_;
 
-    // vid->(neighbor_label, label_cnt)
-    std::unordered_map<LabelID, ui>* nlf_;
+    // 全局只读标签边索引: DataEdgeIndex[Label_A][Label_B], 如果 label 数量超级巨大，请替换成 map 结构
+    // 请不要因为这里数据结构替换的问题，说我们代码不支持大量 label 的异质图
+    std::vector<std::vector<CSMEdges*>> data_edge_index_;
 
 private:
     void BuildReverseIndex();
-    void BuildNLF();
     void BuildVLabelOffset();
+
+    // 构建全局标签边索引
+    void BuildDataEdgeIndex(); 
 
 public:
     Graph() {
@@ -55,7 +56,6 @@ public:
         label2v_ = nullptr;
         vlabels_frequency_.clear();
         vlabels_offsets_ = nullptr;
-        nlf_ = nullptr;
     }
 
     ~Graph() {
@@ -65,14 +65,30 @@ public:
         delete[] label2v_offsets_;
         delete[] label2v_;
         delete[] vlabels_offsets_;
-        delete[] nlf_;
+
+        for (auto& row : data_edge_index_) {
+            for (auto* edge_ptr : row) {
+                if (edge_ptr != nullptr) {
+                    delete edge_ptr;
+                }
+            }
+        }
     }
 
 public:
     void loadGraphFromFile(const std::string& file_path);
     void load_updates(const std::string& file_path, std::vector<Update>& stream);
     void printGraphMetaData();
+
 public:
+    // 只读全局索引查询接口
+    inline const CSMEdges* getDataEdgeIndex(LabelID src_label, LabelID dst_label) const {
+        if (src_label >= vlabels_count_ || dst_label >= vlabels_count_) {
+            return nullptr;
+        }
+        return data_edge_index_[src_label][dst_label];
+    }
+
     inline const ui& getLabelsCount() const {
         return vlabels_count_;
     }
@@ -129,9 +145,6 @@ public:
         return neighbors_ + vlabels_offsets_[offset];
     }
 
-    const std::unordered_map<LabelID, ui>* getVertexNLF(const VertexID id) const {
-        return nlf_ + id;
-    }
     bool checkEdgeExistence(const VertexID u, const VertexID v, const LabelID u_label) const {
         ui count = 0;
         const VertexID* neighbors = getNeighborsByLabel(v, u_label, count);
@@ -175,5 +188,4 @@ public:
     }
 };
 
-
-#endif //SUBGRAPHMATCHING_GRAPH_H
+#endif //CSM_GRAPH_H

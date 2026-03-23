@@ -24,13 +24,11 @@ public:
     }
     void init(const Graph *query_graph, const Graph *data_graph);
     bool try_build_local(Edge de, Edge qe);
-    void update_Aux(Update de, vector<Edge>& matched_edges);
+    void update_Aux(Update de);
 
 private:
     bool propagate_forward(ui u, ui unbr);
     bool propagate_neighbor_constraint(ui u_fixed, VertexID v_fixed, uint64_t& in_queue);
-    void insert_edge(CSMEdges* old_edges, VertexID v_src, VertexID v_nbr);
-    void delete_edge(CSMEdges* old_edges, VertexID v_src, VertexID v_nbr);
     inline void set_bit(uint64_t& mask, ui idx) { mask |= (1ULL << idx); }
     inline void clear_bit(uint64_t& mask, ui idx) { mask &= ~(1ULL << idx); }
     inline bool get_bit(uint64_t mask, ui idx) { return (mask >> idx) & 1ULL; }

@@ -4,7 +4,6 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
-#include <utils/graphoperations.h>
 
 void Graph::BuildReverseIndex() {
     label2v_ = new ui[vertices_count_];
@@ -20,20 +19,6 @@ void Graph::BuildReverseIndex() {
     for (ui i = 0; i < vertices_count_; ++i) {
         LabelID vlabel = vlabels_[i];
         label2v_[label2v_offsets_[vlabel + 1]++] = i;
-    }
-}
-
-void Graph::BuildNLF() {
-    nlf_ = new std::unordered_map<LabelID, ui>[vertices_count_];
-    for (ui i = 0; i < vertices_count_; ++i) {
-        ui count;
-        const VertexID * neighbors = getVertexNeighbors(i, count);
-
-        for (ui j = 0; j < count; ++j) {
-            VertexID u = neighbors[j];
-            LabelID vlabel = getVertexLabel(u);
-            nlf_[i][vlabel] += 1;
-        }
     }
 }
 
@@ -69,6 +54,37 @@ void Graph::BuildVLabelOffset() {
 
         for (ui l = current_vlabel + 1; l <= vlabels_count_; ++l) {
             vlabels_offsets_[vlabels_offset_size + l] = offsets_[i + 1];
+        }
+    }
+}
+
+// 构建全局只读的 DataEdgeIndex[Label_A][Label_B]
+void Graph::BuildDataEdgeIndex() {
+    data_edge_index_.resize(vlabels_count_);
+    for (ui i = 0; i < vlabels_count_; ++i) {
+        data_edge_index_[i].assign(vlabels_count_, nullptr);
+    }
+
+    for (ui u = 0; u < vertices_count_; ++u) {
+        LabelID u_label = vlabels_[u];
+        
+        for (ui j = offsets_[u]; j < offsets_[u + 1]; ++j) {
+            VertexID nbr = neighbors_[j];
+            LabelID nbr_label = vlabels_[nbr];
+            if (data_edge_index_[u_label][nbr_label] == nullptr) {
+                data_edge_index_[u_label][nbr_label] = new CSMEdges();
+            }
+
+            // load时已经排序，add_edge 优化后按序插入不会做搜索
+            data_edge_index_[u_label][nbr_label]->add_edge(u, nbr);
+        }
+    }
+
+    for (ui i = 0; i < vlabels_count_; ++i) {
+        for (ui j = 0; j < vlabels_count_; ++j) {
+            if (data_edge_index_[i][j] != nullptr) {
+                data_edge_index_[i][j]->sort_all_edges();
+            }
         }
     }
 }
@@ -145,8 +161,7 @@ void Graph::loadGraphFromFile(const std::string &file_path) {
     }
 
     BuildReverseIndex();
-    BuildNLF();
-
+    BuildDataEdgeIndex();
 }
 
 void Graph::load_updates(const std::string& file_path, std::vector<Update>& stream) {

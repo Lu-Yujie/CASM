@@ -74,7 +74,7 @@ void CSMEngine::init(const Graph *data_graph, const Graph *query_graph) {
 
 // 函数签名修改：添加 QueryStats& stats
 void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64_t& end_time, QueryStats& stats) {
-    // 1. 第一步：先收集所有受到该数据边影响的查询边 (matched_edges)
+    // 1. 先收集所有受到该数据边影响的查询边 (matched_edges 留作后面的 query/匹配阶段使用)
     vector<Edge> matched_edges;
     for (auto& edge_group : automorphism_edges_) {
         if (edge_group[0].elabel_ == de.edge_.elabel_) {
@@ -83,16 +83,17 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
             }
         }
     }
+    if (matched_edges.empty()) return;
 
-    // 2. 第二步：如果是插入操作 (+)，必须先更新 Global Index
+    // 2. Insert 操作
     if (de.op_ == '+') {
-        auto t_start = QueryStats::now(); // [TIMER START]
-        csm_index->update_Aux(de, matched_edges);
-        auto t_end = QueryStats::now();   // [TIMER END]
+        auto t_start = QueryStats::now(); 
+        csm_index->update_Aux(de);
+        auto t_end = QueryStats::now();   
         QueryStats::add_duration(stats.time_update_aux_ns, t_start, t_end);
     }
 
-    // 3. 第三步：执行查询
+    // 3. 执行查询 (原始逻辑保持不变)
     mpz_t one_embedding_cnt;
     mpz_init(one_embedding_cnt);
     for (size_t i = 0; i < automorphism_edges_.size(); i++) {
@@ -110,8 +111,6 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                 mpz_set_ui(one_embedding_cnt, 0);
 
                 // --- 统计 Candidates 数量 ---
-                // 假设 candidates_count_ptr 是一个数组，长度为查询图的顶点数
-                // 如果您有特定的获取顶点数的方法，请在此处替换 global_index->aux.query_graph->getVerticesCount()
                 size_t q_v_num = csm_index->mem->q_graph->getVerticesCount(); 
                 unsigned long long current_cands = 0;
                 for(size_t v_idx = 0; v_idx < q_v_num; ++v_idx) {
@@ -151,11 +150,11 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
     }
     mpz_clear(one_embedding_cnt);
 
-    // 4. 第四步：如果是删除操作 (-)，更新 Global Index
+    // 4. Delete 操作
     if (de.op_ == '-') {
-        auto t_start = QueryStats::now(); // [TIMER START]
-        csm_index->update_Aux(de, matched_edges);
-        auto t_end = QueryStats::now();   // [TIMER END]
+        auto t_start = QueryStats::now(); 
+        csm_index->update_Aux(de);
+        auto t_end = QueryStats::now();   
         QueryStats::add_duration(stats.time_update_aux_ns, t_start, t_end);
     }
 }

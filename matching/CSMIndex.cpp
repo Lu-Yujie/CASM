@@ -18,56 +18,27 @@ void CSMIndex::init(const Graph *query_graph, const Graph *data_graph) {
     csm_filter.init(data_graph);
 }
 
-// --- 辅助函数：在已知行(row_idx)中插入一条边 v_nbr ---
-void CSMIndex::insert_edge(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
-    if (edges == nullptr) return;
-
-    auto& row = edges->edge_map[v_src]; 
-    ui idx = b_search::lower_bound_idx(row, v_nbr);
-    if (idx == row.size() || row[idx] != v_nbr) {
-        row.insert(row.begin() + idx, v_nbr); // 保持邻接表有序
-    }
-}
-
-// --- 辅助函数：在已知行(row_idx)中删除一条边 v_nbr ---
-void CSMIndex::delete_edge(CSMEdges* edges, VertexID v_src, VertexID v_nbr) {
-    if (edges == nullptr) return;
-
-    auto it = edges->edge_map.find(v_src);
-    if (it == edges->edge_map.end()) return;
-
-    auto& row = it->second;
-    ui idx = b_search::lower_bound_idx(row, v_nbr);
-    if (idx < row.size() && row[idx] == v_nbr) {
-        row.erase(row.begin() + idx);
-    }
-}
-
-void CSMIndex::update_Aux(Update de, vector<Edge>& matched_edges) {
+// 建议修改函数签名，不再需要传入 matched_edges
+void CSMIndex::update_Aux(Update de) {
     auto& d_num = mem->d_num;
-    auto& all_edges = aux.data;
 
     auto v_src = de.edge_.src();
     auto v_dst = de.edge_.dst();
-    char op = de.op_; // '+' or '-'
+    char op = de.op_;
+    LabelID src_label = de.src_label(); 
+    LabelID dst_label = de.dst_label();
 
     // update filter
     csm_filter.update_filter(v_src, v_dst, op);
 
-    for (auto& qe : matched_edges) {
-        auto u_src = qe.src();
-        auto u_dst = qe.dst();
-
-        if (op == '+') {  // === 插入操作 ===
-            if (v_src >= d_num) d_num = v_src + 1;
-            if (v_dst >= d_num) d_num = v_dst + 1;
-
-            insert_edge(all_edges[u_src][u_dst], v_src, v_dst);
-            insert_edge(all_edges[u_dst][u_src], v_dst, v_src);
-        } else {  // === 删除操作 ===
-            delete_edge(all_edges[u_src][u_dst], v_src, v_dst);
-            delete_edge(all_edges[u_dst][u_src], v_dst, v_src);
-        }
+    if (op == '+') {  // === 插入操作 ===
+        if (v_src >= d_num) d_num = v_src + 1;
+        if (v_dst >= d_num) d_num = v_dst + 1;
+        aux.insert_edge(src_label, dst_label, v_src, v_dst);
+        aux.insert_edge(dst_label, src_label, v_dst, v_src); 
+    } else {  // === 删除操作 ===
+        aux.delete_edge(src_label, dst_label, v_src, v_dst);
+        aux.delete_edge(dst_label, src_label, v_dst, v_src);
     }
 }
 
@@ -191,7 +162,7 @@ bool CSMIndex::try_build_local(Edge de, Edge qe) {
     auto v_src = de.src();
     auto v_dst = de.dst();
 
-    auto& q_num = aux.q_num;
+    auto& q_num = mem->q_num;
     const auto& all_visited = mem->all_visited;
     auto& local_cans = this->cans;
     auto& flag_array = mem->flag_array;

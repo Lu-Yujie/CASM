@@ -1,11 +1,13 @@
-#ifndef SUBGRAPHMATCHING_TYPES_H
-#define SUBGRAPHMATCHING_TYPES_H
+#ifndef CSM_TYPES_H
+#define CSM_TYPES_H
 
 #include <cstdint>
 #include <stdlib.h>
 #include <functional>
 #include <vector>
+#include <algorithm>
 #include <absl/container/flat_hash_map.h>
+#include "utils/bSearch.h"
 
 using namespace std;
 
@@ -26,7 +28,7 @@ struct ELabel {
 struct Edge {
     VertexID src_, dst_;
     ELabel elabel_;
-    Edge(uint32_t src, uint32_t dst, uint32_t src_label = 0, uint32_t dst_label = 0):
+    Edge(VertexID src, VertexID dst, LabelID src_label = 0, LabelID dst_label = 0):
         elabel_(src_label, dst_label) {
         src_ = src;
         dst_ = dst;
@@ -35,8 +37,8 @@ struct Edge {
     bool operator==(const Edge& l) const {
         return l.src_ == src_ && l.dst_ == dst_ && l.elabel_ == elabel_;
     }
-    uint32_t& src() { return src_; }
-    uint32_t& dst() { return dst_; }
+    VertexID& src() { return src_; }
+    VertexID& dst() { return dst_; }
 };
 
 namespace std {
@@ -64,6 +66,10 @@ struct Update {
     uint64_t id_;
     char op_;
     Edge edge_;
+    VertexID& src() { return edge_.src_; }
+    VertexID& dst() { return edge_.dst_; }
+    LabelID& src_label() { return edge_.elabel_.src_label_; }
+    LabelID& dst_label() { return edge_.elabel_.dst_label_; }
 };
 
 class Edges {
@@ -90,8 +96,51 @@ struct CSMEdges {
     absl::flat_hash_map<VertexID, std::vector<VertexID>> edge_map;
     CSMEdges() {}
     ~CSMEdges() {}
+
+    inline const std::vector<VertexID>* get_neighbors(VertexID u) const {
+        auto it = edge_map.find(u);
+        if (it != edge_map.end()) {
+            return &(it->second);
+        }
+        return nullptr;
+    }
+
+    inline void add_edge(VertexID u, VertexID v) {
+        auto& neighbors = edge_map[u];
+        if (neighbors.empty() || neighbors.back() < v) {
+            neighbors.push_back(v);
+        } else {
+            ui idx = b_search::lower_bound_idx(neighbors, v);
+            if (idx == neighbors.size() || neighbors[idx] != v) {
+                neighbors.insert(neighbors.begin() + idx, v);
+            }
+        }
+    }
+
+    inline void delete_edge(VertexID u, VertexID v) {
+        auto it = edge_map.find(u);
+        if (it == edge_map.end()) return; // 没找到起点 u，直接返回
+
+        auto& neighbors = it->second;
+        ui idx = b_search::lower_bound_idx(neighbors, v);
+        
+        // 找到了目标边，执行删除
+        if (idx < neighbors.size() && neighbors[idx] == v) {
+            neighbors.erase(neighbors.begin() + idx);
+        }
+    }
+
+    // 全量排序清理函数
+    inline void sort_all_edges() {
+        for (auto& pair : edge_map) {
+            std::sort(pair.second.begin(), pair.second.end());
+            // 去重
+            pair.second.erase(std::unique(pair.second.begin(), pair.second.end()), pair.second.end());
+        }
+    }
+
     vector<VertexID>& operator[] (ui v_idx) { return edge_map[v_idx]; }
-    ui v_cnt() { return edge_map.size(); }
+    ui v_cnt() const { return edge_map.size(); }
 };
 
-#endif //SUBGRAPHMATCHING_TYPES_H
+#endif //CSM_TYPES_H
