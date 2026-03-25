@@ -19,17 +19,17 @@ void CSMIndex::init(const Graph *query_graph, const Graph *data_graph) {
 }
 
 // 建议修改函数签名，不再需要传入 matched_edges
-void CSMIndex::update_Aux(Update de) {
+void CSMIndex::update_Aux(Update& de) {
     auto& d_num = mem->d_num;
 
     auto v_src = de.edge_.src();
     auto v_dst = de.edge_.dst();
     char op = de.op_;
-    LabelID src_label = de.src_label(); 
+    LabelID src_label = de.src_label();
     LabelID dst_label = de.dst_label();
 
     // update filter
-    csm_filter.update_filter(v_src, v_dst, op);
+    csm_filter.update_filter(de);
 
     if (op == '+') {  // === 插入操作 ===
         if (v_src >= d_num) d_num = v_src + 1;
@@ -65,7 +65,7 @@ bool CSMIndex::propagate_neighbor_constraint(ui u_fixed, VertexID v_fixed, uint6
             target_cans.clear();
 
             for (VertexID v : valid_candidates) {
-                if (csm_filter.filter_check(v, unbr_q_deg)) {
+                if (csm_filter.filter_check(v, unbr_q_deg, aux.q_labels[unbr])) {
                     target_cans.push_back(v);
                 }
             }
@@ -126,7 +126,7 @@ bool CSMIndex::propagate_forward(ui u, ui unbr) {
         for (VertexID v : reset_buffer) {
             flag_array[v] = false;
 
-            if (csm_filter.filter_check(v, unbr_q_deg)) {
+            if (csm_filter.filter_check(v, unbr_q_deg, aux.q_labels[unbr])) {
                 reset_buffer[write_idx++] = v;
             }
         }

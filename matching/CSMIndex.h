@@ -24,7 +24,7 @@ public:
     }
     void init(const Graph *query_graph, const Graph *data_graph);
     bool try_build_local(Edge de, Edge qe);
-    void update_Aux(Update de);
+    void update_Aux(Update& de);
 
 private:
     bool propagate_forward(ui u, ui unbr);

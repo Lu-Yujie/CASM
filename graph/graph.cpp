@@ -156,9 +156,8 @@ void Graph::loadGraphFromFile(const std::string &file_path) {
         }
     }
 
-    for (ui i = 0; i < vertices_count_; ++i) {
-        std::sort(neighbors_ + offsets_[i], neighbors_ + offsets_[i + 1]);
-    }
+    // if graph file is checked, remove sort
+    // for (ui i = 0; i < vertices_count_; ++i) std::sort(neighbors_ + offsets_[i], neighbors_ + offsets_[i + 1]);
 
     BuildReverseIndex();
     BuildDataEdgeIndex();
