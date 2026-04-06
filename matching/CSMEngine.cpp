@@ -109,6 +109,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
 
             if (build_success) {
                 mpz_set_ui(one_embedding_cnt, 0);
+                csm_index->mem->quick_index->indep_info->set_cur(edge_group[0].src(), edge_group[0].dst());
 
                 // --- 统计 Candidates 数量 ---
                 size_t q_v_num = csm_index->mem->q_graph->getVerticesCount(); 

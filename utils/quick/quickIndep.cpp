@@ -5,31 +5,28 @@
 using namespace std;
 
 QuickIndep::QuickIndep(ui dnum, const Graph* query_graph, bool* visited_u) {
-    auto& qnum = query_graph->getVerticesCount();
+    this->qnum = query_graph->getVerticesCount();
     this->query_graph = query_graph;
     indep_con_cnt = new ui[dnum];
-    memset(indep_con_cnt, 0, sizeof(ui)*dnum);
 
+    // Allocate Shared Buffers (Max size is qnum)
     degree = new ui[qnum];
+    enum_cans = new const VertexID*[qnum];
+    enum_cans_cnt = new ui[qnum];
+    enum_idx = new ui[qnum];
+    un_con_cnt = new ui[qnum];
+    phase = new bool[qnum];
+    embedding_level = new mpz_t[qnum];
+    for (ui i = 0; i < qnum; i++) mpz_init(embedding_level[i]);
 
-    cover_set = new VertexID[qnum];
-    indepSetOnDegree(query_graph, cover_set, visited_u);
-    indep_set = cover_set+cover_num;
-
-    enum_cans = new const VertexID*[indep_num];
-    enum_cans_cnt = new ui[indep_num];
-    enum_idx = new ui[indep_num];
-    un_con_cnt = new ui[indep_num];
-    phase = new bool[indep_num];
-
-    embedding_level = new mpz_t[indep_num];
-    for (ui i = 0 ; i < indep_num; i++) mpz_init(embedding_level[i]);
+    // Precompute Independent Sets for All Edges
+    initAllEdges(visited_u);
 }
 
 QuickIndep::~QuickIndep() {
     delete[] indep_con_cnt;
     delete[] degree;
-    delete[] cover_set;
+    for (auto& pair : edge_infos) delete[] pair.second.cover_set;
     delete[] enum_cans;
     delete[] enum_cans_cnt;
     delete[] enum_idx;
@@ -38,6 +35,124 @@ QuickIndep::~QuickIndep() {
 
     for (ui i = 0 ; i < indep_num; i++) mpz_clear(embedding_level[i]);
     delete[] embedding_level;
+}
+
+void QuickIndep::initAllEdges(bool* visited_u) {
+    auto offset = query_graph->getOffsets();
+    auto edges = query_graph->getEdges();
+
+    for (VertexID u = 0; u < qnum; u++) {
+        for (ui i = offset[u]; i < offset[u + 1]; i++) {
+            VertexID v = edges[i];
+
+            // Only process each undirected edge once
+            if (u < v) { 
+                EdgeIndepInfo info;
+                // Allocate qnum space for the combined cover_set + indep_set
+                info.cover_set = new VertexID[qnum]; 
+
+                buildIndepForEdge(query_graph, u, v, info, visited_u);
+                edge_infos[{u, v}] = info;
+            }
+        }
+    }
+}
+
+void QuickIndep::print() {
+    std::cout << "=== Edge Independent Sets Info ===" << std::endl;
+    for (const auto& pair : edge_infos) {
+        VertexID u = pair.first.first;
+        VertexID v = pair.first.second;
+        const auto& info = pair.second;
+
+        std::cout << "Edge (" << u << ", " << v << "):" << std::endl;
+        
+        // 打印 Cover Set
+        std::cout << "  Cover Set (" << info.cover_num << "): [";
+        for (ui i = 0; i < info.cover_num; i++) {
+            std::cout << info.cover_set[i] << (i == info.cover_num - 1 ? "" : ", ");
+        }
+        std::cout << "]" << std::endl;
+
+        // 打印 Independent Set
+        std::cout << "  Indep Set (" << info.indep_num << "): [";
+        for (ui i = 0; i < info.indep_num; i++) {
+            std::cout << info.indep_set[i] << (i == info.indep_num - 1 ? "" : ", ");
+        }
+        std::cout << "]" << std::endl;
+    }
+    std::cout << "==================================" << std::endl;
+    // exit(-1);
+}
+
+void QuickIndep::buildIndepForEdge(const Graph* graph, VertexID src, VertexID dst, EdgeIndepInfo& info, bool* visited_u) {
+    auto offset = graph->getOffsets();
+    auto edges = graph->getEdges();
+
+    // Reset visited flags and calculate degrees
+    memset(visited_u, false, sizeof(bool) * qnum);
+    for (VertexID i = 0; i < qnum; i++) {
+        degree[i] = graph->getVertexDegree(i);
+    }
+
+    info.cover_num = 0;
+
+    // Helper lambda to fix a node into cover_set and update degrees
+    auto fix_node = [&](VertexID u) {
+        if (!visited_u[u]) {
+            visited_u[u] = true;
+            info.cover_set[info.cover_num++] = u;
+            for (ui i = offset[u]; i < offset[u + 1]; i++) {
+                VertexID neighbor = edges[i];
+                if (degree[neighbor] > 0) degree[neighbor]--;
+            }
+        }
+    };
+
+    // 1. Force fix the edge endpoints into cover_set first
+    fix_node(src);
+    fix_node(dst);
+
+    // 2. Select remaining cover set based on remaining Degree (High -> Low)
+    while (true) {
+        int maxDegree = 0;
+        VertexID selectedNode = (VertexID)-1;
+        for (VertexID i = 0; i < qnum; i++) {
+            if (!visited_u[i] && degree[i] > maxDegree) {
+                maxDegree = degree[i];
+                selectedNode = i;
+            }
+        }
+
+        if (selectedNode == (VertexID)-1) break;
+        fix_node(selectedNode);
+    }
+
+    // 3. The remaining unvisited nodes become the independent set
+    info.indep_num = 0;
+    info.indep_set = info.cover_set + info.cover_num;
+    for (VertexID i = 0; i < qnum; i++) {
+        if (!visited_u[i]) {
+            info.indep_set[info.indep_num++] = i;
+        }
+    }
+}
+
+void QuickIndep::set_cur(VertexID v_src, VertexID v_dst) {
+    // Standardize edge key (undirected representation)
+    VertexID u = std::min(v_src, v_dst);
+    VertexID v = std::max(v_src, v_dst);
+
+    auto it = edge_infos.find({u, v});
+    if (it != edge_infos.end()) {
+        indep_set = it->second.indep_set;
+        cover_set = it->second.cover_set;
+        indep_num = it->second.indep_num;
+        cover_num = it->second.cover_num;
+    } else {
+        cout << "can not find matched indep info" << endl;
+        exit(-1);
+    }
 }
 
 void QuickIndep::enumeration(bool* visited_v) {
@@ -54,7 +169,10 @@ void QuickIndep::enumeration(bool* visited_v) {
 }
 
 void QuickIndep::enum4Parts(bool* visited_v) {
-    if (indep_num == 0) return;
+    if (UNLIKELY(indep_num == 0)) {
+        mpz_set_ui(embedding_level[0], 1); 
+        return;
+    }
 
     ui depth = 0;
     auto& idx = enum_idx;
@@ -66,13 +184,13 @@ void QuickIndep::enum4Parts(bool* visited_v) {
     mpz_set_ui(embedding_level[0], 0);
 
     while (true) {
-        // --- 叶子节点逻辑保持不变 ---
+        // --- 最后一个节点 ---
         if (depth == indep_num - 1) {
             ui tmp_cnt = 0;
-            ui leaf_size = cans_cnt[depth];
-            const VertexID* leaf_cans = cans[depth];
-            for (ui i = 0; i < leaf_size; i++) {
-                if (!visited_v[leaf_cans[i]]) tmp_cnt++;
+            ui last_size = cans_cnt[depth];
+            const VertexID* last_cans = cans[depth];
+            for (ui i = 0; i < last_size; i++) {
+                if (!visited_v[last_cans[i]]) tmp_cnt++;
             }
             mpz_add_ui(embedding_level[depth], embedding_level[depth], tmp_cnt);
             goto BACKTRACK;

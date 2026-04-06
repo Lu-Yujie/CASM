@@ -86,6 +86,7 @@ QueryEngine::QuickEngine(CSMIndex* csm_index, size_t output_limit_num,
     }
 
     // Release the buffer.
+    visited_u[cover_set[0]] = false;
     return;
 }
 
