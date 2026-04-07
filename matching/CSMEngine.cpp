@@ -125,14 +125,25 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
 
                 // --- 统计 BSXEngine ---
                 auto t_bsx_start = QueryStats::now();
-                // QueryEngine::BSXEngine(global_index->aux.dnum,
-                //                        global_index->aux.query_graph,
-                //                        adapter.edge_matrix_ptr,
-                //                        adapter.candidates_ptr,
-                //                        adapter.candidates_count_ptr,
-                //                        global_index->mem->order,
-                //                        output_limit, one_embedding_cnt, end_time);
-                QueryEngine::QuickEngine(csm_index, output_limit, one_embedding_cnt, end_time);
+                if (true) {  // selector
+                    QueryAdapter adapter(csm_index);
+                    thread_local vector<VertexID> order;
+                    order.resize(q_v_num);
+                    QueryEngine::BSXEngine(
+                        csm_index->mem->d_num,
+                        csm_index->mem->q_graph,
+                        adapter.edge_matrix_ptr,
+                        adapter.candidates_ptr,
+                        adapter.candidates_count_ptr,
+                        order.data(),
+                        &(csm_index->isei),
+                        output_limit,
+                        one_embedding_cnt,
+                        end_time
+                    );
+                } else {
+                    QueryEngine::QuickEngine(csm_index, output_limit, one_embedding_cnt, end_time);
+                }
                 auto t_bsx_end = QueryStats::now();
                 QueryStats::add_duration(stats.time_bsx_ns, t_bsx_start, t_bsx_end);
                 // ---------------------

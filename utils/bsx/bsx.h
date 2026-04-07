@@ -13,6 +13,7 @@
 #include "pretty_print.h"
 #include "utils/bSearch.h"
 #include "utils/common.h"
+#include "utils/quick/ISEI.h"
 using namespace std;
 
 /**structures used to store batch info
@@ -120,11 +121,12 @@ public:
     ui num_cover_;
     ui* indep_con_cnt_;    // count the number of times each indep_cans may conflict
     ui** sep_flag_;        // seperate indep cans
+    ISEIndex* isei_;
 
     // temporary embeddings
     mpz_t level_embeddings_;  // #embeddings of one depth
     mpz_t label_embeddings_;  // #embeddings of one kind of label, for enumeration
-    BSXIndex(const Graph*q_graph, ui d_num, Edges ***index, ui **cans, ui *cans_cnt, ui num_cover) {
+    BSXIndex(const Graph*q_graph, ui d_num, Edges ***index, ui **cans, ui *cans_cnt, ui num_cover, ISEIndex* isei) {
         q_graph_ = q_graph;
         num_cover_ = num_cover;
         auto qnum = q_graph->getVerticesCount();
@@ -164,6 +166,7 @@ public:
         }
         mpz_init(level_embeddings_);
         mpz_init(label_embeddings_);
+        isei_ = isei;
     }
 
     ~BSXIndex() {

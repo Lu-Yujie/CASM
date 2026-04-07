@@ -8,11 +8,6 @@
 #define MAXIMUM_QUERY_GRAPH_SIZE 64
 #define HASH_TABLE_RATIO 1.2
 
-/**
- * Define ANALYZE_DUPLICATE to enable the record the duplicate information
- */
-// #define ANALYZE_DUPLICATE
-
 #if defined(__GNUC__) || defined(__clang__)
     #define LIKELY(x)   __builtin_expect(!!(x), 1)
     #define UNLIKELY(x) __builtin_expect(!!(x), 0)

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <absl/container/flat_hash_map.h>
 #include "utils/bSearch.h"
+#include "config.h"
 
 using namespace std;
 
@@ -75,7 +76,7 @@ struct Update {
 class Edges {
 public:
     ui* offset_;
-    ui* edge_;
+    VertexID* edge_;
     ui vertex_count_;
     ui edge_count_;
 public:

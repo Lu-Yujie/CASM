@@ -17,7 +17,7 @@ public:
 
     static void
     BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix, ui **candidates,
-              ui *candidates_count, ui *order, size_t output_limit_num,
+              ui *candidates_count, ui *order, ISEIndex* isei, size_t output_limit_num,
               mpz_t embedding_cnt, int64_t& time_limit);
 
 private:
@@ -45,7 +45,8 @@ private:
 
     static void bsxEnumerate4Parts(ui **&sep_flags, const VertexID* nodes, ui num_nodes, std::vector<std::vector<VertexID>>& cans, bool *&visited_v, mpz_t cur_cnt);
 
-    static void bsxComEqBatchDirect(BSXIndex& index, VertexID u, std::vector<ui>& idxs);
+    static void bsxComEqBatchDirect(BSXIndex& index, VertexID u, const std::vector<CandidateSig>& pre_group,
+                                    ui start, ui end, const std::vector<ui>& filtered_original_idxs);
 
     static void bsxGenResult(ui indep_num, const VertexID* indep, BSXIndex& index);
 

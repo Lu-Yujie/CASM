@@ -1,6 +1,5 @@
 #include "QueryEngine.h"
 #include "utils/bsx/IndepSet.h"
-#include "utils/bsx/nodeSim.h"
 #include "utils/setOp.h"
 #include <stack>
 #include <vector>
@@ -37,6 +36,7 @@ QueryEngine::QuickEngine(CSMIndex* csm_index, size_t output_limit_num,
     mpz_set_ui(embedding_cnt, 0);
     ui cur_depth = 0;
     VertexID start_vertex = cover_set[cur_depth];
+    memset(visited_u, false, sizeof(bool)*qnum);
     visited_u[start_vertex] = true;
     valid_idx[start_vertex] = 0;
 
@@ -86,7 +86,6 @@ QueryEngine::QuickEngine(CSMIndex* csm_index, size_t output_limit_num,
     }
 
     // Release the buffer.
-    visited_u[cover_set[0]] = false;
     return;
 }
 
@@ -167,7 +166,7 @@ QueryEngine::quickEnum(QuickIndex& index) {
 */
 void
 QueryEngine::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
-                          ui **candidates, ui *candidates_count, ui *order,
+                          ui **candidates, ui *candidates_count, ui *order, ISEIndex* isei,
                           size_t output_limit_num, mpz_t embedding_cnt, int64_t& time_limit) {
     ui q_num = query_graph->getVerticesCount();
     // separate leaf and trunk vertices(min_vertex_cover)
@@ -176,11 +175,7 @@ QueryEngine::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
     auto num_indep = q_num - num_cover;
     const VertexID* indep_nodes =  order + num_cover;
 
-    // structure used to store history intersection info
-    // std::deque<IntersectCache> cachedIntersect;   // max size is the height of the tree
-    // construct index structure, contains the history info
-    // new index structure, update in time, 24-3-7
-    BSXIndex index(query_graph, d_num, edge_matrix, candidates, candidates_count, num_cover);
+    BSXIndex index(query_graph, d_num, edge_matrix, candidates, candidates_count, num_cover, isei);
     auto& batch_info = index.batch_info;
 
     // auxiliary data structure
@@ -200,29 +195,6 @@ QueryEngine::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
     // batch_info[start_vertex].print();
     index.valid_cans_[start_vertex].push(new VertexID[batch_info[start_vertex].maxCnt_.top()]);
     index.valid_cnt_[start_vertex].push(0);
-
-#ifdef ANALYZE_DUPLICATE
-    auto g_name = query_graph->g_name;
-    size_t last_slash_pos = g_name.find_last_of('/');
-    if (last_slash_pos != std::string::npos)
-        g_name = g_name.substr(last_slash_pos + 1);
-    size_t last_dot_pos = g_name.find_last_of('.');
-    if (last_dot_pos != std::string::npos)
-        g_name = g_name.substr(0, last_dot_pos);
-    g_name = "./" + g_name;
-    int status = mkdir(g_name.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-
-    if (status != 0) {
-        std::cout << g_name << ": Failed to create folder.\n";
-        exit(-1);
-    }
-
-    std::vector<std::ofstream> out_files;
-    out_files.resize(q_num);
-    for (ui i = 1; i < q_num; i++) {
-        out_files[i-1].open(g_name + "/" + std::to_string(i-1) + ".txt");
-    }
-#endif
 
     while (true) {
         while (batch_info[depth2u[cur_depth]].idx_.top() < batch_info[depth2u[cur_depth]].num_.top()) {
@@ -246,34 +218,9 @@ QueryEngine::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
                 continue;
             }
 
-#ifdef ANALYZE_DUPLICATE
-            for (ui i = 0; i < q_num; i++) {
-                auto cur_u = order[i];
-                if (!visited_u[cur_u]) {
-                    for (ui j = 0; j < index.valid_cnt_[cur_u].top();j++) {
-                        out_files[cur_depth] << index.valid_cans_[cur_u].top()[j] << " ";
-                    }
-                    out_files[cur_depth] << std::endl;
-                }
-            }
-            out_files[cur_depth] << "------" << std::endl;
-#endif
-
             u2v[u] = cur_batch[0];
 
             if (cur_depth >= num_cover - 1) {
-#ifdef ANALYZE_DUPLICATE
-                for (ui indep_idx = num_cover; indep_idx < q_num - 1; indep_idx++) {
-                    for (ui i = num_cover; i < q_num; i++) {
-                        auto cur_u = order[i];
-                        for (ui j = 0; j < index.valid_cnt_[cur_u].top();j++) {
-                            out_files[indep_idx] << index.valid_cans_[cur_u].top()[j] << " ";
-                        }
-                        out_files[indep_idx] << std::endl;
-                    }
-                    out_files[indep_idx] << "------" << std::endl;
-                }
-#endif
                 // enumerate results on indep nodes, process ancestors' ves by the way
                 bsxGenResult(num_indep, indep_nodes, index);
                 mpz_add(embedding_cnt, embedding_cnt, level_embeddings);
@@ -314,13 +261,6 @@ QueryEngine::BSXEngine(ui d_num, const Graph *query_graph, Edges ***edge_matrix,
 
     // Release the buffer.
     EXIT:
-
-#ifdef ANALYZE_DUPLICATE
-    for (ui i = 1; i < q_num; i++) { 
-        out_files[i-1].close();
-    }
-#endif
-
     return;
 }
 
@@ -514,108 +454,116 @@ QueryEngine::bsxComEqBatch(BSXIndex& index, VertexID u) {
     auto& batch_nodes = index.batch_info[u].nodes_.top();
     auto& offset = index.batch_info[u].offset_.top();
     auto& cnt = index.batch_info[u].cnt_.top();
+    auto& isei = index.isei_;
+
     batch_nodes = new VertexID[num_node];
     offset = new VertexID[num_node];
     cnt = new VertexID[num_node];
-    if (index.valid_cnt_[u].top() < 16) {  // if #nodes < 16, compute batch by comparing each other
-        std::vector<ui> idxs;
-        idxs.reserve(num_node);
-        for (ui i = 0; i < num_node; i++) idxs.emplace_back(i);
-        bsxComEqBatchDirect(index, u, idxs);
-    } else {  // if #nodes >= 16, compute batch by nodeSimilarity
-        std::vector<int64_t> similarity = std::move(NodeSim::nodeSim(index, u));
-        std::vector<std::pair<int64_t, ui>> sim_sorted;
-        sim_sorted.reserve(num_node);
-        for (ui i = 0; i < similarity.size(); i++) {
-            sim_sorted.emplace_back(similarity[i], i);
-        }
-        // sort smilarity, id (ensure the correct order)
-        std::sort(sim_sorted.begin(), sim_sorted.end());
-        ui batch_start = 0, batch_end = 0;
-        std::vector<VertexID> batch_idxs;
-        while(batch_end < num_node) {
-            batch_idxs.clear();
-            batch_idxs.emplace_back(sim_sorted[batch_start].second);
-            while((++batch_end) < num_node && sim_sorted[batch_end].first == sim_sorted[batch_start].first) {
-                batch_idxs.emplace_back(sim_sorted[batch_end].second);;
+
+    auto& nodes = index.valid_cans_[u].top();
+    ui unbrs_count;
+    const ui *unbrs = index.q_graph_->getVertexNeighbors(u, unbrs_count);
+
+    // 过滤无效点
+    thread_local std::vector<VertexID> filtered_vids;
+    thread_local std::vector<ui> filtered_original_idxs;
+    filtered_vids.clear();
+    filtered_original_idxs.clear();
+
+    for (ui i = 0; i < num_node; i++) {
+        bool is_valid = true;
+        for (ui unbr_idx = 0; unbr_idx < unbrs_count; unbr_idx++) {
+            auto& edges = index.index_[u][unbrs[unbr_idx]].top();
+            if (edges->offset_[i+1] - edges->offset_[i] == 0) {
+                is_valid = false; break;
             }
-            assert(batch_end-batch_start == batch_idxs.size());
-            bsxComEqBatchDirect(index, u, batch_idxs);
-            batch_start = batch_end;
         }
+        if (is_valid) {
+            filtered_vids.push_back(nodes[i]);
+            filtered_original_idxs.push_back(i);
+        }
+    }
+    if (filtered_vids.empty()) return;
+
+    // 调用 ISEI 获取预分组辅助结构
+    const auto& pre_group = isei->getPreGroup(filtered_vids.data(), filtered_vids.size());
+
+    // 对每一个“特征相同块”执行精细化校验
+    ui current_pos = 0;
+    ui total_vids = pre_group.size();
+    while (current_pos < total_vids) {
+        ui block_start = current_pos;
+        uint64_t current_sig = pre_group[block_start].signature;
+        while (current_pos < total_vids && pre_group[current_pos].signature == current_sig) {
+            current_pos++;
+        }
+
+        // 精细分组
+        bsxComEqBatchDirect(index, u, pre_group, block_start, current_pos, filtered_original_idxs);
     }
 }
 
 // compute equ-batch on idxs, idxs indicate which nodes participate batch computation
 void
-QueryEngine::bsxComEqBatchDirect(BSXIndex& index, VertexID u, std::vector<ui>& idxs) {
-    auto& nodes = index.valid_cans_[u].top();
-    auto num_idxs = idxs.size();
-    auto& batches = index.batch_info[u].nodes_.top();
+QueryEngine::bsxComEqBatchDirect(BSXIndex& index, VertexID u, const std::vector<CandidateSig>& pre_group,
+                                 ui start, ui end, const std::vector<ui>& filtered_original_idxs) {
+    auto& batch_nodes = index.batch_info[u].nodes_.top();
     auto& offset = index.batch_info[u].offset_.top();
     auto& cnt = index.batch_info[u].cnt_.top();
     auto& num = index.batch_info[u].num_.top();
     auto& maxCnt = index.batch_info[u].maxCnt_.top();
+
+    auto& nodes = index.valid_cans_[u].top();
     ui unbrs_count;
     const ui *unbrs = index.q_graph_->getVertexNeighbors(u, unbrs_count);
-    // -1 -- error-node(offset[*] == 0) and should be deleted, 0 -- un-processed
-    ui* batch_idx = new ui[num_idxs];  // indicate each node belonging to ?th batch
-    memset(batch_idx, 0, sizeof(ui)*num_idxs);
 
-    // delete all nodes that have no edge connection with its neighbors
-    for (ui i = 0; i < num_idxs; i++) {
-        auto idx = idxs[i];
-        for (ui unbr_idx = 0; unbr_idx < unbrs_count; unbr_idx++) {
-            auto& unbr = unbrs[unbr_idx];
-            auto& edges = index.index_[u][unbr].top();
-            if (edges->offset_[idx+1] - edges->offset_[idx] == 0) {
-                batch_idx[i] = (ui)-1;
-                break;
-            }
-        }
-    }
+    // 块内局部处理
+    ui block_size = end - start;
+    thread_local std::vector<bool> local_assigned;
+    local_assigned.assign(block_size, false);
 
-    ui batch_cnt = 1;  // number from 1
-    for (ui i = 0; i < num_idxs; i++) {
-        auto& idx = idxs[i];
-        if (batch_idx[i] != 0) continue;
-        batch_idx[i] = batch_cnt++;
-        offset[num] = num == 0 ? 0 : offset[num-1]+cnt[num-1];  // set offset of cur_batch
+    for (ui i = 0; i < block_size; i++) {
+        if (local_assigned[i]) continue;
+
+        // 提取节点在 BSX 原始索引中的真正位置
+        ui filtered_idx_i = pre_group[start + i].original_idx;
+        ui real_idx_i = filtered_original_idxs[filtered_idx_i];
+
+        offset[num] = num == 0 ? 0 : offset[num-1] + cnt[num-1];
         cnt[num] = 1;
-        batches[offset[num]] = nodes[idx];
-        for (ui j = i+1; j < num_idxs; j++) {
-            if (batch_idx[j] != 0) continue;
-            auto ev_idx = idxs[j];
+        batch_nodes[offset[num]] = nodes[real_idx_i];
+        local_assigned[i] = true;
+
+        for (ui j = i + 1; j < block_size; j++) {
+            if (local_assigned[j]) continue;
+
+            ui filtered_idx_j = pre_group[start + j].original_idx;
+            ui real_idx_j = filtered_original_idxs[filtered_idx_j];
+
+            // 邻居校验
             bool equ = true;
-            // compare the nbrs
             for (ui unbr_idx = 0; unbr_idx < unbrs_count; unbr_idx++) {
-                VertexID unbr = unbrs[unbr_idx];
-                auto& edges = index.index_[u][unbr].top();
-                if (edges->offset_[idx+1]-edges->offset_[idx]
-                    != edges->offset_[ev_idx+1] - edges->offset_[ev_idx]) {
-                    equ = false;
-                    break;
+                auto& edges = index.index_[u][unbrs[unbr_idx]].top();
+                ui d1 = edges->offset_[real_idx_i+1] - edges->offset_[real_idx_i];
+                ui d2 = edges->offset_[real_idx_j+1] - edges->offset_[real_idx_j];
+                if (d1 != d2) { equ = false; break; }
+                
+                ui s1 = edges->offset_[real_idx_i], s2 = edges->offset_[real_idx_j];
+                for (ui k = 0; k < d1; k++) {
+                    if (edges->edge_[s1+k] != edges->edge_[s2+k]) { equ = false; break; }
                 }
-                for (ui u2 = 0; u2 < edges->offset_[idx+1] - edges->offset_[idx]; u2++) {
-                    if (edges->edge_[u2+edges->offset_[idx]] != edges->edge_[u2+edges->offset_[ev_idx]]) {
-                        equ = false;
-                        break;
-                    }
-                }
-                if (equ == false) break;
+                if (!equ) break;
             }
-            if (equ == true) {
-                batch_idx[j] = batch_cnt;
-                batches[offset[num]+(cnt[num]++)] = nodes[ev_idx];
+
+            if (equ) {
+                local_assigned[j] = true;
+                batch_nodes[offset[num] + (cnt[num]++)] = nodes[real_idx_j];
             }
         }
-        // process max_cnt
+        std::sort(batch_nodes + offset[num], batch_nodes + offset[num] + cnt[num]);
         if (maxCnt < cnt[num]) maxCnt = cnt[num];
-        // no need for sort, because the idxs have been sorted and this fun. will not break it
-        // std::sort(batch+offset[num], batch+(offset[num]+cnt[num]));
         num++;
     }
-    delete[] batch_idx;
 }
 
 // equ-batch refine, just process first v of valid_cans, because of they are equ

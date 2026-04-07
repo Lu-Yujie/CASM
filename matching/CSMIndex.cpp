@@ -16,9 +16,9 @@ void CSMIndex::init(const Graph *query_graph, const Graph *data_graph) {
     mem = new MemoryManager(max_cans, query_graph, data_graph);
     aux.buildData(query_graph, data_graph, mem->visited_bitmask);
     csm_filter.init(data_graph);
+    isei.init(d_num);
 }
 
-// 建议修改函数签名，不再需要传入 matched_edges
 void CSMIndex::update_Aux(Update& de) {
     auto& d_num = mem->d_num;
 
@@ -30,6 +30,7 @@ void CSMIndex::update_Aux(Update& de) {
 
     // update filter
     csm_filter.update_filter(de);
+    isei.updateEdge(v_src, v_dst);
 
     if (op == '+') {  // === 插入操作 ===
         if (v_src >= d_num) d_num = v_src + 1;

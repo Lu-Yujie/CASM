@@ -38,7 +38,6 @@ public:
     auto& qnum = query_graph->getVerticesCount();
     this->qnum = qnum; 
     visited_u = new bool[qnum];
-    memset(visited_u, false, sizeof(bool) * qnum);
     visited_v = new bool[dnum];
     memset(visited_v, false, sizeof(bool) * dnum);
     valid_idx = new ui[qnum];
@@ -50,7 +49,6 @@ public:
 
     embedding = new Embedding(qnum);
     indep_info = new QuickIndep(dnum, query_graph, visited_u);
-    memset(visited_u, false, sizeof(bool) * qnum);
     valid_cans.reserve(qnum);
     for (int i = 0; i < qnum; ++i) {
       valid_cans.emplace_back(max_cans, qnum);

@@ -4,6 +4,7 @@
 #include "utils/quick/quickIndex.h"
 #include "utils/quick/memoryManager.h"
 #include "utils/quick/aux.h"
+#include "utils/quick/ISEI.h"
 #include "CSMFilter.h"
 
 using namespace std;
@@ -14,6 +15,7 @@ public:
     vector<vector<VertexID>> cans;
     MemoryManager* mem;
     CSMFilter csm_filter;
+    ISEIndex isei;
 
     CSMIndex() {}
     ~CSMIndex() {

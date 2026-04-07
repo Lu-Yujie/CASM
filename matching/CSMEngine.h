@@ -7,6 +7,136 @@
 #include <vector>
 #include <iomanip> // for std::fixed, std::setprecision
 
+struct QueryAdapter {
+    // === 适配后的数据，供 BSXEngine 直接使用 ===
+    ui** candidates_ptr = nullptr;
+    ui* candidates_count_ptr = nullptr;
+    Edges*** edge_matrix_ptr = nullptr;
+    ui qnum;
+
+    QueryAdapter(CSMIndex* csm_index) {
+        auto query_graph = csm_index->mem->q_graph;
+        qnum = query_graph->getVerticesCount();
+        ui dnum = csm_index->mem->d_num;
+        auto& cans = csm_index->cans;
+        auto& aux = csm_index->aux;
+
+        // --- 1. 适配 Candidates ---
+        candidates_ptr = new ui*[qnum];
+        candidates_count_ptr = new ui[qnum];
+        for (ui i = 0; i < qnum; ++i) {
+            candidates_ptr[i] = const_cast<ui*>(cans[i].data());
+            candidates_count_ptr[i] = cans[i].size();
+        }
+
+        // --- 2. 初始化 Edge Matrix ---
+        edge_matrix_ptr = new Edges**[qnum];
+        for (ui i = 0; i < qnum; ++i) {
+            edge_matrix_ptr[i] = new Edges*[qnum];
+            for (ui j = 0; j < qnum; ++j) {
+                edge_matrix_ptr[i][j] = nullptr;
+            }
+        }
+
+        // --- 3. 构建局部的 Edge Matrix (核心逻辑) ---
+        std::vector<ui> flag(dnum, 0);
+        std::vector<VertexID> updated_flag;
+        std::vector<uint64_t> visited(qnum, 0); // 防重位图，最多支持 64 个查询点
+
+        for (ui u = 0; u < qnum; u++) {
+            ui u_nbrs_count;
+            const VertexID* u_nbrs = query_graph->getVertexNeighbors(u, u_nbrs_count);
+
+            // 给 u 的候选点打上 flag，值为 candidate_index + 1
+            updated_flag.clear();
+            for (ui j = 0; j < cans[u].size(); ++j) {
+                VertexID v = cans[u][j];
+                flag[v] = j + 1;
+                updated_flag.push_back(v);
+            }
+
+            for (ui i = 0; i < u_nbrs_count; ++i) {
+                ui u_nbr = u_nbrs[i];
+
+                // 无向图边只需处理一次，避免双向重复计算
+                if (visited[u] & (1ULL << u_nbr)) {
+                    continue;
+                }
+                visited[u] |= (1ULL << u_nbr);
+                visited[u_nbr] |= (1ULL << u);
+
+                std::vector<std::vector<VertexID>> fwd_temp(cans[u_nbr].size()); // u_nbr -> u
+                std::vector<std::vector<VertexID>> bwd_temp(cans[u].size());     // u -> u_nbr
+
+                for (ui j = 0; j < cans[u_nbr].size(); ++j) {
+                    VertexID v = cans[u_nbr][j];
+                    const auto& v_nbrs = aux.getNeighbors(u_nbr, u, v);
+
+                    for (VertexID v_nbr : v_nbrs) {
+                        if (flag[v_nbr] != 0) {
+                            ui u_idx = flag[v_nbr] - 1;
+                            fwd_temp[j].push_back(v_nbr);
+                            bwd_temp[u_idx].push_back(v);
+                        }
+                    }
+                }
+                edge_matrix_ptr[u_nbr][u] = convert_to_csr(fwd_temp);
+                edge_matrix_ptr[u][u_nbr] = convert_to_csr(bwd_temp);
+            }
+            for (auto& v : updated_flag) {
+                flag[v] = 0;
+            }
+        }
+    }
+
+    ~QueryAdapter() {
+        delete[] candidates_ptr;
+        delete[] candidates_count_ptr;
+
+        if (edge_matrix_ptr != nullptr) {
+            for (ui i = 0; i < qnum; ++i) {
+                for (ui j = 0; j < qnum; ++j) {
+                    if (edge_matrix_ptr[i][j] != nullptr) {
+                        delete edge_matrix_ptr[i][j];
+                    }
+                }
+                delete[] edge_matrix_ptr[i];
+            }
+            delete[] edge_matrix_ptr;
+        }
+    }
+
+private:
+    // 转换为 BSXEngine 专用的 CSR 结构
+    Edges* convert_to_csr(std::vector<std::vector<VertexID>>& src_edges) {
+        Edges* dst = new Edges();
+        ui row_count = src_edges.size();
+        dst->vertex_count_ = row_count; // 行数即当前查询点的 candidate 数量
+
+        size_t total_edges = 0;
+        for (ui i = 0; i < row_count; ++i) {
+            total_edges += src_edges[i].size();
+        }
+        dst->edge_count_ = total_edges;
+
+        // offset 大小为 candidates_count + 1
+        dst->offset_ = new ui[row_count + 1];
+        dst->edge_ = new ui[total_edges];
+
+        ui current_offset = 0;
+        for (ui i = 0; i < row_count; ++i) {
+            dst->offset_[i] = current_offset;
+            if (!src_edges[i].empty()) {
+                std::memcpy(dst->edge_ + current_offset, src_edges[i].data(), src_edges[i].size() * sizeof(VertexID));
+                current_offset += src_edges[i].size();
+            }
+        }
+        dst->offset_[row_count] = current_offset;
+        
+        return dst;
+    }
+};
+
 // 用于统计的辅助结构体
 struct QueryStats {
     long long time_update_aux_ns = 0;
