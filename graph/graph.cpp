@@ -165,7 +165,7 @@ void Graph::loadGraphFromFile(const std::string &file_path) {
 
 void Graph::load_updates(const std::string& file_path, std::vector<Update>& stream) {
     uint32_t vertex_num = this->getVerticesCount();
-    spp::sparse_hash_map<uint32_t, uint32_t> new_vertex_label;
+    absl::flat_hash_map<uint32_t, uint32_t> new_vertex_label;
     Update update;
 
     std::ifstream ifs(file_path);

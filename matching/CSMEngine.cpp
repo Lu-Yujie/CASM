@@ -9,7 +9,7 @@ void CSMEngine::build_automorphism_edges(const Graph *query_graph) {
     GraphOperations::compute_automorphism(query_graph, automorphisms);
 
     uint32_t n = query_graph->getVerticesCount();
-    spp::sparse_hash_set<Edge> selected;
+    absl::flat_hash_set<Edge> selected;
 
     for (uint32_t u = 0; u < n; ++u) {
         uint32_t u_nbr_count;
@@ -124,8 +124,9 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                 // ---------------------------
 
                 // --- 统计 BSXEngine ---
+                auto engine_type = csm_index->isei.routeQuery();
                 auto t_bsx_start = QueryStats::now();
-                if (true) {  // selector
+                if (engine_type == EngineType::GROUP_BASED) {  // selector
                     QueryAdapter adapter(csm_index);
                     thread_local vector<VertexID> order;
                     order.resize(q_v_num);
@@ -141,7 +142,7 @@ void CSMEngine::query(Update de, size_t output_limit, mpz_t embedding_cnt, int64
                         one_embedding_cnt,
                         end_time
                     );
-                } else {
+                } else if (engine_type == EngineType::QUICK_BASED) {
                     QueryEngine::QuickEngine(csm_index, output_limit, one_embedding_cnt, end_time);
                 }
                 auto t_bsx_end = QueryStats::now();

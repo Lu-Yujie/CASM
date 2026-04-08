@@ -16,7 +16,7 @@ void CSMIndex::init(const Graph *query_graph, const Graph *data_graph) {
     mem = new MemoryManager(max_cans, query_graph, data_graph);
     aux.buildData(query_graph, data_graph, mem->visited_bitmask);
     csm_filter.init(data_graph);
-    isei.init(d_num);
+    isei.init(d_num, data_graph->getOffsets(), data_graph->getEdges());
 }
 
 void CSMIndex::update_Aux(Update& de) {
@@ -30,7 +30,7 @@ void CSMIndex::update_Aux(Update& de) {
 
     // update filter
     csm_filter.update_filter(de);
-    isei.updateEdge(v_src, v_dst);
+    isei.stageEdgeUpdate(v_src, v_dst);
 
     if (op == '+') {  // === 插入操作 ===
         if (v_src >= d_num) d_num = v_src + 1;

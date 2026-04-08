@@ -4,11 +4,8 @@
 #include <unordered_map>
 #include <iostream>
 #include <vector>
-#include "utils/sparsepp/spp.h"
 #include "configuration/types.h"
 #include "configuration/config.h"
-
-using spp::sparse_hash_map;
 
 class Graph {
 public:
