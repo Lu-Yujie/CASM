@@ -42,6 +42,9 @@ QueryEngine::QuickEngine(CSMIndex* csm_index, size_t output_limit_num,
 
     while (true) {
         while (valid_idx[cover_set[cur_depth]] < valid_cans[cover_set[cur_depth]].cur_cans_cnt()) {
+            if (TimeOp::getClockNan() >= time_limit) {
+                goto EXIT;
+            }
             VertexID u = cover_set[cur_depth];
             VertexID v = valid_cans[u].cur_cans()[valid_idx[u]];
             // cout << "u: " << u << ", v: " << v << endl;
@@ -85,6 +88,7 @@ QueryEngine::QuickEngine(CSMIndex* csm_index, size_t output_limit_num,
         quickDeRefine(csm_index, cur_u);
     }
 
+    EXIT:
     // Release the buffer.
     return;
 }
