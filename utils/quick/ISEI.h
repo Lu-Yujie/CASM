@@ -202,7 +202,7 @@ public:
     }
 
     void init(ui initial_capacity, const ui* offsets, const VertexID* neighbors,
-              ui N_tau = 1000000, double tau_ent = 0.6, int random_seed = 1337){
+              ui N_tau = 10000, double tau_ent = 0.6, int random_seed = 1337){
         vertices_count_ = initial_capacity;
         if (vertices_count_ == 0) vertices_count_ = 1;
 

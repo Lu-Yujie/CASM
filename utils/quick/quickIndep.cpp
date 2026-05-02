@@ -33,7 +33,7 @@ QuickIndep::~QuickIndep() {
     delete[] un_con_cnt;
     delete[] phase;
 
-    for (ui i = 0 ; i < indep_num; i++) mpz_clear(embedding_level[i]);
+    for (ui i = 0 ; i < qnum; i++) mpz_clear(embedding_level[i]);
     delete[] embedding_level;
 }
 
